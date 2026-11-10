@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+
+package org.signal.chat.profile.test;
+
+// This may be removed in favor of a canonical libsignal definition in a future release
+
+// Externally padded using PKCS#7
+message PlaintextProfileData {
+  string givenName = 1; // min length = 1, max length = 257
+  string familyName = 2; // min length = 0, max length = 257
+  string about = 3; // min length = 0, max length = 512
+  string aboutEmoji = 4; // min length = 0, max length = 32
+  // URL of the user's avatar. The domain must be one of Signal's known CDN domains.
+  // If the user has no avatar, this will be empty.
+  string avatar = 5; // min length = 0, max length = 128
+  bool phoneNumberSharing = 6;
+  // next: 7
+}

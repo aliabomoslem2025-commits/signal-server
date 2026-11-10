@@ -1,0 +1,687 @@
+/*
+ * Copyright 2023 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.grpc;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Empty;
+import io.grpc.ServerInterceptors;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import javax.annotation.Nonnull;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.commons.lang3.tuple.Pair;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.signal.chat.common.IdentityType;
+import org.signal.chat.common.ServiceIdentifier;
+import org.signal.chat.require.Auth;
+import org.signal.chat.rpc.Color;
+import org.signal.chat.rpc.NestedMessage;
+import org.signal.chat.rpc.RecursiveMessage;
+import org.signal.chat.rpc.SimpleAnonymousServiceGrpc;
+import org.signal.chat.rpc.SimpleAuthServiceGrpc;
+import org.signal.chat.rpc.SimpleValidationTestServiceGrpc;
+import org.signal.chat.rpc.ValidationTestServiceGrpc;
+import org.signal.chat.rpc.ValidationsRequest;
+import org.signal.chat.rpc.ValidationsResponse;
+import org.whispersystems.textsecuregcm.grpc.validators.ValidatorUtils;
+import org.whispersystems.textsecuregcm.util.TestRandomUtil;
+import org.whispersystems.textsecuregcm.util.UUIDUtil;
+
+public class ValidatingInterceptorTest {
+
+  @RegisterExtension
+  static final GrpcServerExtension GRPC_SERVER_EXTENSION = new GrpcServerExtension();
+
+  private static final class ValidationTestGrpcServiceImpl extends
+      SimpleValidationTestServiceGrpc.ValidationTestServiceImplBase {
+
+    @Override
+    public ValidationsResponse validationsEndpoint(final ValidationsRequest request) {
+      return ValidationsResponse.getDefaultInstance();
+    }
+  }
+
+  private static final class AuthGrpcServiceImpl extends SimpleAuthServiceGrpc.AuthServiceImplBase {
+
+    @Override
+    public Empty authenticatedMethod(final Empty request) {
+      return Empty.getDefaultInstance();
+    }
+  }
+
+  private static final class AnonymousGrpcServiceImpl extends SimpleAnonymousServiceGrpc.AnonymousServiceImplBase {
+
+    @Override
+    public Empty anonymousMethod(final Empty request) {
+      return Empty.getDefaultInstance();
+    }
+  }
+
+  private ValidationTestServiceGrpc.ValidationTestServiceBlockingStub stub;
+
+
+  @BeforeEach
+  void setUp() {
+    final ValidationTestGrpcServiceImpl validationTestGrpcService = new ValidationTestGrpcServiceImpl();
+    final AuthGrpcServiceImpl authGrpcService = new AuthGrpcServiceImpl();
+    final AnonymousGrpcServiceImpl anonymousGrpcService = new AnonymousGrpcServiceImpl();
+
+    GRPC_SERVER_EXTENSION.getServiceRegistry()
+        .addService(ServerInterceptors.intercept(validationTestGrpcService, new ValidatingInterceptor()));
+    GRPC_SERVER_EXTENSION.getServiceRegistry()
+        .addService(authGrpcService);
+    GRPC_SERVER_EXTENSION.getServiceRegistry()
+        .addService(anonymousGrpcService);
+
+    stub = ValidationTestServiceGrpc.newBlockingStub(GRPC_SERVER_EXTENSION.getChannel());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"15551234567", "", "123", "+1 555 1234567", "asdf"})
+  public void testE164ValidationFailure(final String invalidNumber) throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setNumber(invalidNumber)
+            .build()
+    ));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"1====", "zzz?", "123/", "123+"})
+  public void testBase64UrlValidationFailure(final String invalidBase64Url) {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setBase64Url(invalidBase64Url)
+            .build()
+    ));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"abc=", "ab==", "aa", "ab", "abc", "A_b-Cd"})
+  public void testBase64UrlPermittedValues(final String validBase64Url) {
+    assertDoesNotThrow(() -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setBase64Url(validBase64Url)
+            .build()));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void serviceIdentifierIdentityTypeFieldValidator(final boolean messagePresent) {
+
+    final ValidationsRequest.Builder builder = builderWithValidDefaults();
+
+    if (messagePresent) {
+      builder.setAciServiceIdentifier(ServiceIdentifier.newBuilder()
+              .setIdentityType(IdentityType.IDENTITY_TYPE_ACI)
+              .setUuid(UUIDUtil.toByteString(UUID.randomUUID()))
+              .build())
+          .setPniServiceIdentifier(ServiceIdentifier.newBuilder()
+              .setIdentityType(IdentityType.IDENTITY_TYPE_PNI)
+              .setUuid(UUIDUtil.toByteString(UUID.randomUUID()))
+              .build());
+    } else {
+      builder.clearAciServiceIdentifier()
+          .clearPniServiceIdentifier();
+    }
+
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builder.build()));
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = org.signal.chat.common.IdentityType.class, names = {"IDENTITY_TYPE_UNSPECIFIED", "IDENTITY_TYPE_PNI"})
+  public void testServiceIdentifierIdentityTypeAciValidationFailure(final IdentityType identityType) {
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .setAciServiceIdentifier(ServiceIdentifier.newBuilder()
+            .setIdentityType(identityType)
+            .setUuid(UUIDUtil.toByteString(UUID.randomUUID())))
+        .build()));
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = org.signal.chat.common.IdentityType.class, names = {"IDENTITY_TYPE_UNSPECIFIED", "IDENTITY_TYPE_ACI"})
+  public void testServiceIdentifierIdentityTypePniValidationFailure(final IdentityType identityType) {
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .setPniServiceIdentifier(ServiceIdentifier.newBuilder()
+            .setIdentityType(identityType)
+            .setUuid(UUIDUtil.toByteString(UUID.randomUUID())))
+        .build()));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1, 2, 3, 4, 6, 1000})
+  public void testExactlySizeValidationFailure(final int size) throws Exception {
+    final String stringValue = RandomStringUtils.secure().nextAlphanumeric(size);
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setFixedSizeString(stringValue)
+            .build()
+    ));
+
+    final ByteString byteValue = ByteString.copyFrom(TestRandomUtil.nextBytes(size));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setFixedSizeBytes(byteValue)
+            .build()
+    ));
+
+    final List<String> listValue = IntStream.range(0, size)
+        .mapToObj(i -> RandomStringUtils.secure().nextAlphabetic(10))
+        .toList();
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearFixedSizeList()
+            .addAllFixedSizeList(listValue)
+            .build()
+    ));
+  }
+
+  @Test
+  public void testExactlySizeMultiplePermittedValues() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setExactlySizeVariants("abc")
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setExactlySizeVariants("")
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearExactlySizeVariants()
+            .build()
+    ));
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setExactlySizeVariants("ab")
+            .build()
+    );
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setExactlySizeVariants("abcd")
+            .build()
+    );
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .build()
+    );
+  }
+
+  public static Stream<Arguments> testRangeSizeValidationFailure() {
+    return Stream.of(
+        Arguments.of(0, Status.INVALID_ARGUMENT),
+        Arguments.of(1, Status.INVALID_ARGUMENT),
+        Arguments.of(2, Status.INVALID_ARGUMENT),
+        Arguments.of(3, Status.OK),
+        Arguments.of(4, Status.OK),
+        Arguments.of(5, Status.OK),
+        Arguments.of(6, Status.OK),
+        Arguments.of(7, Status.OK),
+        Arguments.of(8, Status.OK),
+        Arguments.of(9, Status.INVALID_ARGUMENT),
+        Arguments.of(1000, Status.INVALID_ARGUMENT)
+    );
+  }
+
+  @ParameterizedTest
+  @MethodSource
+  public void testRangeSizeValidationFailure(final int size, final Status expectedStatus) throws Exception {
+    final String stringValue = RandomStringUtils.secure().nextAlphanumeric(size);
+    assertEquals(expectedStatus.getCode(), requestStatus(() -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setRangeSizeString(stringValue)
+            .build()
+    )).getCode());
+
+    final ByteString byteValue = ByteString.copyFrom(TestRandomUtil.nextBytes(size));
+    assertEquals(expectedStatus.getCode(), requestStatus(() -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setRangeSizeBytes(byteValue)
+            .build()
+    )).getCode());
+
+    final List<String> listValue = IntStream.range(0, size)
+        .mapToObj(i -> RandomStringUtils.secure().nextAlphabetic(10))
+        .toList();
+    assertEquals(expectedStatus.getCode(), requestStatus(() -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearRangeSizeList()
+            .addAllRangeSizeList(listValue)
+            .build()
+    )).getCode());
+  }
+
+  @Test
+  public void testNotOptionalWithMaxLimit() throws Exception {
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearWithMaxBytes()
+            .build()
+    );
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearWithMaxString()
+            .build()
+    );
+  }
+
+  @Test
+  public void testNotOptionalWithMinLimit() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearWithMinBytes()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearWithMinString()
+            .build()
+    ));
+  }
+
+  @Test
+  public void testServiceExtensionValueExtraction() throws Exception {
+    final Map<String, Optional<Auth>> authValues = GRPC_SERVER_EXTENSION.getServiceRegistry().getServices()
+        .stream()
+        .map(sd -> Pair.of(
+            sd.getServiceDescriptor().getName(),
+            ValidatorUtils.serviceAuthExtensionValue(sd)
+        ))
+        .collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+    assertEquals(Map.of(
+        "org.signal.chat.rpc.ValidationTestService", Optional.empty(),
+        "org.signal.chat.rpc.AuthService", Optional.of(Auth.AUTH_ONLY_AUTHENTICATED),
+        "org.signal.chat.rpc.AnonymousService", Optional.of(Auth.AUTH_ONLY_ANONYMOUS)
+    ), authValues);
+  }
+
+  @Test
+  public void testNonEmpty() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearNonEmptyList()
+            .build()
+    ));
+    // check not setting a value
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearNonEmptyBytes()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearNonEmptyBytesOptional()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearNonEmptyString()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearNonEmptyStringOptional()
+            .build()
+    ));
+    // now check explicitly setting an empty value
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setNonEmptyBytes(ByteString.EMPTY)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setNonEmptyBytesOptional(ByteString.EMPTY)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setNonEmptyString("")
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setNonEmptyStringOptional("")
+            .build()
+    ));
+  }
+
+  @Test
+  public void testEnumSpecified() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearColor()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setColor(Color.COLOR_UNSPECIFIED)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearColorOptional()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setColorOptional(Color.COLOR_UNSPECIFIED)
+            .build()
+    ));
+  }
+
+  @Test
+  public void testRange() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setI32(1000)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setUi32(-1)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearI32Range()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setI32OptRange(5)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setI32OptRange(1000)
+            .build()
+    ));
+  }
+
+  @Test
+  public void testAllowedValues() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValues(2)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearAllowedValues()
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesOptional(0)
+            .build()
+    ));
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValues(100)
+            .build()
+    );
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesOptional(-1)
+            .build()
+    );
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearAllowedValuesOptional()
+            .build()
+    );
+  }
+
+  @Test
+  public void testAllowedValuesString() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesString("subscription")
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesString("")
+            .build()
+    ));
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesString("gift")
+            .build()
+    );
+  }
+
+  @Test
+  public void testAllowedValuesEnum() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesEnum(Color.COLOR_GREEN)
+            .build()
+    ));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesEnum(Color.COLOR_UNSPECIFIED)
+            .build()
+    ));
+    stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .setAllowedValuesEnum(Color.COLOR_BLUE)
+            .build()
+    );
+  }
+
+  @Test
+  public void testPresent() throws Exception {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearPresentMessage()
+            .build()
+    ));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(
+        builderWithValidDefaults()
+            .clearOptionalPresentMessage()
+            .build()
+    ));
+  }
+
+  @Test
+  public void testAllFieldsValidationSuccess() throws Exception {
+    stub.validationsEndpoint(builderWithValidDefaults().build());
+  }
+
+  @Test
+  public void eachExactlySize() {
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builderWithValidDefaults().build()));
+
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachExactlyBytes(ByteString.copyFrom(new byte[4]))
+        .addEachExactlyBytes(ByteString.copyFrom(new byte[4]))
+        .build()));
+
+    // second element is the wrong length
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachExactlyBytes(ByteString.copyFrom(new byte[4]))
+        .addEachExactlyBytes(ByteString.copyFrom(new byte[3]))
+        .build()));
+  }
+
+  @Test
+  public void eachRange() {
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachRange(1)
+        .addEachRange(127)
+        .build()));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachRange(0)
+        .build()));
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachRange(128)
+        .build()));
+  }
+
+  @Test
+  public void eachNonEmpty() {
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachNonEmpty("a")
+        .build()));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .addEachNonEmpty("a")
+        .addEachNonEmpty("")
+        .build()));
+  }
+
+  @Test
+  public void eachCombinedWithCollectionConstraint() {
+    // empty list fails the collection-level `size {min:1}` constraint
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .clearEachCombined()
+        .build()));
+
+    // too many elements (collection-level `size {max:3}`)
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .clearEachCombined()
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .build()));
+
+    // count is in range but an element is the wrong length
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(builderWithValidDefaults()
+        .clearEachCombined()
+        .addEachCombined(ByteString.copyFrom(new byte[3]))
+        .build()));
+
+    // both constraints satisfied
+    assertDoesNotThrow(() -> stub.validationsEndpoint(builderWithValidDefaults()
+        .clearEachCombined()
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .addEachCombined(ByteString.copyFrom(new byte[4]))
+        .build()));
+  }
+
+  @Test
+  public void testFailedValidationOnNestedMessage() {
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () ->
+        stub.validationsEndpoint(builderWithValidDefaults().setNested(NestedMessage.newBuilder().setI32(101)).build()));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () ->
+        stub.validationsEndpoint(builderWithValidDefaults()
+            .clearRepeatedNested()
+            .addRepeatedNested(NestedMessage.newBuilder().setI32(101)).build()));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () ->
+        stub.validationsEndpoint(builderWithValidDefaults()
+            .clearMapNested()
+            .putMapNested("foo", NestedMessage.newBuilder().setI32(101).build()).build()));
+  }
+
+  @Test
+  public void deeplyNestedValidation() throws Exception {
+    // The default proto nesting limit (what we use in gRPC) is 100. Make sure we can handle twice that amount of nesting
+    int numNestedMessages = 100 * 2;
+    RecursiveMessage.Builder curr = RecursiveMessage.newBuilder().setI32(101);
+    for (int i = 0; i < numNestedMessages; i++) {
+      final RecursiveMessage.Builder pred = RecursiveMessage.newBuilder();
+      pred.setNext(curr);
+      curr = pred;
+    }
+    final RecursiveMessage recursiveMessage = curr.build();
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () ->
+        stub.validationsEndpoint(builderWithValidDefaults().setRecursiveMessage(recursiveMessage).build()));
+  }
+
+  @Test
+  public void oneOfValidation() throws Exception {
+
+    // These should pass even if we don't meet the requirements on the one-of case that we're not setting
+    assertDoesNotThrow(() ->
+        stub.validationsEndpoint(builderWithValidDefaults()
+            .setOneOfNonEmptyBytes(ByteString.copyFrom(new byte[1]))
+            .build()));
+    assertDoesNotThrow(() ->
+        stub.validationsEndpoint(builderWithValidDefaults()
+            .setOneOfMessage(ValidationsRequest.RequirePresentMessage.getDefaultInstance())
+            .build()));
+
+    GrpcTestUtils.assertStatusException(Status.INVALID_ARGUMENT, () -> stub.validationsEndpoint(ValidationsRequest.newBuilder().setOneOfNonEmptyBytes(ByteString.EMPTY).build()));
+  }
+
+  @Nonnull
+  private static ValidationsRequest.Builder builderWithValidDefaults() {
+    return ValidationsRequest.newBuilder()
+        .setNumber("+15551234567")
+        .setFixedSizeString("12345")
+        .setFixedSizeBytes(ByteString.copyFrom(new byte[5]))
+        .setWithMinBytes(ByteString.copyFrom(new byte[5]))
+        .setWithMaxBytes(ByteString.copyFrom(new byte[5]))
+        .setWithMinString("12345")
+        .setWithMaxString("12345")
+        .setExactlySizeVariants("ab")
+        .setRangeSizeString("abc")
+        .setNonEmptyString("abc")
+        .setNonEmptyStringOptional("abc")
+        .setPresentMessage(ValidationsRequest.RequirePresentMessage.getDefaultInstance())
+        .setOptionalPresentMessage(ValidationsRequest.RequirePresentMessage.getDefaultInstance())
+        .setColor(Color.COLOR_GREEN)
+        .setColorOptional(Color.COLOR_GREEN)
+        .setNonEmptyBytes(ByteString.copyFrom(new byte[5]))
+        .setNonEmptyBytesOptional(ByteString.copyFrom(new byte[5]))
+        .addAllNonEmptyList(List.of("a", "b", "c", "d", "e"))
+        .setRangeSizeBytes(ByteString.copyFrom(new byte[3]))
+        .addAllFixedSizeList(List.of("a", "b", "c", "d", "e"))
+        .addAllRangeSizeList(List.of("a", "b", "c", "d", "e"))
+        .setI32Range(15)
+        .setAllowedValues(1)
+        .setNested(NestedMessage.getDefaultInstance())
+        .addRepeatedNested(NestedMessage.getDefaultInstance())
+        .putMapNested("test", NestedMessage.getDefaultInstance())
+        .setBase64Url("123aBc_-")
+        .setAciServiceIdentifier(ServiceIdentifier.newBuilder()
+            .setIdentityType(IdentityType.IDENTITY_TYPE_ACI)
+            .setUuid(UUIDUtil.toByteString(UUID.randomUUID()))
+            .build())
+        .setPniServiceIdentifier(ServiceIdentifier.newBuilder()
+            .setIdentityType(IdentityType.IDENTITY_TYPE_PNI)
+            .setUuid(UUIDUtil.toByteString(UUID.randomUUID()))
+            .build())
+        .addEachCombined(ByteString.copyFrom(new byte[4]));
+  }
+
+  private static Status requestStatus(final Runnable runnable) {
+    try {
+      runnable.run();
+      return Status.OK;
+    } catch (final StatusRuntimeException e) {
+      return e.getStatus();
+    }
+  }
+}

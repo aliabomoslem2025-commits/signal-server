@@ -1,0 +1,250 @@
+/*
+ * Copyright 2013 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.controllers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import io.dropwizard.auth.AuthValueFactoryProvider;
+import io.dropwizard.testing.junit5.DropwizardExtensionsSupport;
+import io.dropwizard.testing.junit5.ResourceExtension;
+import jakarta.ws.rs.core.Response;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.spec.InvalidKeySpecException;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.InstanceOfAssertFactories;
+import org.glassfish.jersey.test.grizzly.GrizzlyWebTestContainerFactory;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.whispersystems.textsecuregcm.attachments.AttachmentUtil;
+import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
+import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
+import org.whispersystems.textsecuregcm.attachments.TusConfiguration;
+import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
+import org.whispersystems.textsecuregcm.configuration.secrets.SecretBytes;
+import org.whispersystems.textsecuregcm.entities.AttachmentDescriptorV3;
+import org.whispersystems.textsecuregcm.experiment.ExperimentEnrollmentManager;
+import org.whispersystems.textsecuregcm.limits.RateLimiter;
+import org.whispersystems.textsecuregcm.limits.RateLimiters;
+import org.whispersystems.textsecuregcm.mappers.RateLimitExceededExceptionMapper;
+import org.whispersystems.textsecuregcm.tests.util.AuthHelper;
+import org.whispersystems.textsecuregcm.util.MockUtils;
+import org.whispersystems.textsecuregcm.util.SystemMapper;
+import org.whispersystems.textsecuregcm.util.TestRandomUtil;
+
+@ExtendWith(DropwizardExtensionsSupport.class)
+class AttachmentControllerV4Test {
+
+  private static final RateLimiter COUNT_RATE_LIMITER = mock(RateLimiter.class);
+  private static final RateLimiter BYTE_RATE_LIMITER = mock(RateLimiter.class);
+
+  private static final RateLimiters RATE_LIMITERS = MockUtils.buildMock(RateLimiters.class, rateLimiters -> {
+    when(rateLimiters.getAttachmentLimiter()).thenReturn(COUNT_RATE_LIMITER);
+    when(rateLimiters.getAttachmentBytesLimiter()).thenReturn(BYTE_RATE_LIMITER);
+  });
+
+  private static final String CDN3_ENABLED_CREDS = AuthHelper.getAuthHeader(AuthHelper.VALID_UUID, AuthHelper.VALID_PASSWORD);
+  private static final String CDN3_DISABLED_CREDS = AuthHelper.getAuthHeader(AuthHelper.VALID_UUID_TWO, AuthHelper.VALID_PASSWORD_TWO);
+  private static final ExperimentEnrollmentManager EXPERIMENT_MANAGER = MockUtils.buildMock(ExperimentEnrollmentManager.class, mgr -> {
+    when(mgr.isEnrolled(AuthHelper.VALID_UUID, AttachmentUtil.CDN3_EXPERIMENT_NAME)).thenReturn(true);
+    when(mgr.isEnrolled(AuthHelper.VALID_UUID_TWO, AttachmentUtil.CDN3_EXPERIMENT_NAME)).thenReturn(false);
+  });
+
+  private static final byte[] TUS_SECRET = TestRandomUtil.nextBytes(32);
+  private static final String TUS_URL = "https://example.com/uploads";
+  private static final long MAX_UPLOAD_LENGTH = 1000;
+
+  public static final String RSA_PRIVATE_KEY_PEM;
+
+  static {
+    try {
+      final KeyPairGenerator  keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+      keyPairGenerator.initialize(1024);
+      final KeyPair           keyPair          = keyPairGenerator.generateKeyPair();
+
+      RSA_PRIVATE_KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" +
+          Base64.getMimeEncoder().encodeToString(keyPair.getPrivate().getEncoded()) + "\n" +
+          "-----END PRIVATE KEY-----";
+    } catch (NoSuchAlgorithmException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+
+  private static final ResourceExtension resources;
+
+  static {
+    try {
+      final GcsAttachmentGenerator gcsAttachmentGenerator = new GcsAttachmentGenerator("some-cdn.signal.org",
+          "signal@example.com", "/attach-here", RSA_PRIVATE_KEY_PEM);
+      resources = ResourceExtension.builder()
+          .addProvider(AuthHelper.getAuthFilter())
+          .addProvider(new AuthValueFactoryProvider.Binder<>(AuthenticatedDevice.class))
+          .setMapper(SystemMapper.jsonMapper())
+          .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
+          .addProvider(new RateLimitExceededExceptionMapper())
+          .addProvider(new AttachmentControllerV4(RATE_LIMITERS,
+              gcsAttachmentGenerator,
+              new TusAttachmentGenerator(new TusConfiguration(new SecretBytes(TUS_SECRET), TUS_URL, TusConfiguration.DEFAULT_TOKEN_EXPIRATION)),
+              EXPERIMENT_MANAGER, MAX_UPLOAD_LENGTH))
+          .build();
+    } catch (IOException | InvalidKeyException | InvalidKeySpecException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  @AfterEach
+  public void tearDown() {
+    reset(COUNT_RATE_LIMITER, BYTE_RATE_LIMITER);
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {-1, 0})
+  void testInvalidUploadLength(final long uploadLength) {
+    assertThat(resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", uploadLength)
+        .request()
+        .header("Authorization", CDN3_ENABLED_CREDS)
+        .get().getStatus())
+        .isEqualTo(Response.Status.BAD_REQUEST.getStatusCode());
+  }
+
+  @Test
+  void testUploadTooLarge() {
+    assertThat(resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", MAX_UPLOAD_LENGTH + 1)
+        .request()
+        .header("Authorization", CDN3_ENABLED_CREDS)
+        .get().getStatus())
+        .isEqualTo(Response.Status.REQUEST_ENTITY_TOO_LARGE.getStatusCode());
+  }
+
+  @Test
+  void countRateLimitExceeded() throws RateLimitExceededException {
+    doThrow(RateLimitExceededException.class).when(COUNT_RATE_LIMITER).validate(AuthHelper.VALID_UUID);
+    assertThat(resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", MAX_UPLOAD_LENGTH)
+        .request()
+        .header("Authorization", CDN3_ENABLED_CREDS)
+        .get().getStatus())
+        .isEqualTo(Response.Status.TOO_MANY_REQUESTS.getStatusCode());
+  }
+
+  @Test
+  void rollbackRateLimit() throws RateLimitExceededException {
+    doThrow(RateLimitExceededException.class).when(BYTE_RATE_LIMITER)
+        .validate(AuthHelper.VALID_UUID, MAX_UPLOAD_LENGTH);
+    assertThat(resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", MAX_UPLOAD_LENGTH)
+        .request()
+        .header("Authorization", CDN3_ENABLED_CREDS)
+        .get().getStatus())
+        .isEqualTo(Response.Status.TOO_MANY_REQUESTS.getStatusCode());
+
+    verify(COUNT_RATE_LIMITER).validate(AuthHelper.VALID_UUID);
+    verify(COUNT_RATE_LIMITER).restorePermits(AuthHelper.VALID_UUID, 1);
+  }
+
+  @Test
+  void testV4TusForm() {
+    AttachmentDescriptorV3 descriptor = resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", MAX_UPLOAD_LENGTH)
+        .request()
+        .header("Authorization", CDN3_ENABLED_CREDS)
+        .get(AttachmentDescriptorV3.class);
+    assertThat(descriptor.cdn()).isEqualTo(3);
+    assertThat(descriptor.key()).isNotBlank();
+    assertThat(descriptor.signedUploadLocation()).isEqualTo(TUS_URL + "/" + "attachments");
+    final String filenameb64 = descriptor.headers().get("Upload-Metadata").split(" ")[1];
+    final String filename = new String(Base64.getDecoder().decode(filenameb64));
+    assertThat(descriptor.key()).isEqualTo(filename);
+  }
+
+  @Test
+  void testV4GcsForm() throws MalformedURLException {
+    AttachmentDescriptorV3 descriptor = resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .queryParam("uploadLength", MAX_UPLOAD_LENGTH)
+        .request()
+        .header("Authorization", CDN3_DISABLED_CREDS)
+        .get(AttachmentDescriptorV3.class);
+    assertThat(descriptor.cdn()).isEqualTo(2);
+    assertValidCdn2Response(descriptor);
+  }
+
+  @Test
+  void testV4GcsFormNoUploadLength() throws MalformedURLException {
+    assertThat(resources.getJerseyTest()
+        .target("/v4/attachments/form/upload")
+        .request()
+        .header("Authorization", CDN3_DISABLED_CREDS)
+        .get()
+        .getStatus()).isEqualTo(400);
+  }
+
+  private static void assertValidCdn2Response(final AttachmentDescriptorV3 descriptor) throws MalformedURLException {
+    assertThat(descriptor.key()).isNotBlank();
+    assertThat(descriptor.cdn()).isEqualTo(2);
+    assertThat(descriptor.headers()).hasSize(3);
+    assertThat(descriptor.headers()).extractingByKey("host").isEqualTo("some-cdn.signal.org");
+    assertThat(descriptor.headers()).extractingByKey("x-goog-resumable").isEqualTo("start");
+    assertThat(descriptor.headers()).extractingByKey("x-goog-content-length-range").isEqualTo("1,1000");
+    assertThat(descriptor.signedUploadLocation()).isNotEmpty();
+    assertThat(descriptor.signedUploadLocation()).contains("X-Goog-Signature");
+    //noinspection ResultOfMethodCallIgnored
+    assertThatNoException().isThrownBy(() -> URI.create(descriptor.signedUploadLocation()));
+
+    final URL signedUploadLocation = URI.create(descriptor.signedUploadLocation()).toURL();
+    assertThat(signedUploadLocation.getHost()).isEqualTo("some-cdn.signal.org");
+    assertThat(signedUploadLocation.getPath()).startsWith("/attach-here/");
+    final Map<String, String> queryParamMap = new HashMap<>();
+    final String[] queryTerms = signedUploadLocation.getQuery().split("&");
+    for (final String queryTerm : queryTerms) {
+      final String[] keyValueArray = queryTerm.split("=", 2);
+      queryParamMap.put(
+          URLDecoder.decode(keyValueArray[0], StandardCharsets.UTF_8),
+          URLDecoder.decode(keyValueArray[1], StandardCharsets.UTF_8));
+    }
+
+    assertThat(queryParamMap).extractingByKey("X-Goog-Algorithm").isEqualTo("GOOG4-RSA-SHA256");
+    assertThat(queryParamMap).extractingByKey("X-Goog-Expires").isEqualTo("90000");
+    assertThat(queryParamMap).extractingByKey("X-Goog-SignedHeaders").isEqualTo("host;x-goog-content-length-range;x-goog-resumable");
+    assertThat(queryParamMap).extractingByKey("X-Goog-Date", Assertions.as(InstanceOfAssertFactories.STRING)).isNotEmpty();
+
+    final String credential = queryParamMap.get("X-Goog-Credential");
+    String[] credentialParts = credential.split("/");
+    assertThat(credentialParts).hasSize(5);
+    assertThat(credentialParts[0]).isEqualTo("signal@example.com");
+    assertThat(credentialParts[2]).isEqualTo("auto");
+    assertThat(credentialParts[3]).isEqualTo("storage");
+    assertThat(credentialParts[4]).isEqualTo("goog4_request");
+  }
+}

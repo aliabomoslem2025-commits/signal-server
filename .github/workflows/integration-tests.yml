@@ -1,0 +1,51 @@
+name: Integration Tests
+
+on:
+  schedule:
+    - cron: '30 19 * * MON-FRI'
+  workflow_dispatch:
+
+env:
+  # This may seem a little redundant, but copying the configuration to an environment variable makes it easier and safer
+  # to then write its contents to a file
+  INTEGRATION_TEST_CONFIG: ${{ vars.INTEGRATION_TEST_CONFIG }}
+
+jobs:
+  build:
+    if: ${{ vars.INTEGRATION_TEST_CONFIG != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install APT packages
+        run: |
+          # setup-java requires gpg
+          sudo apt update
+          sudo apt install -y gpg
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version-file: .java-version
+          cache: 'maven'
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        name: Configure AWS credentials from Test account
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Write integration test configuration
+        run: |
+          mkdir -p integration-tests/src/main/resources
+          echo "${INTEGRATION_TEST_CONFIG}" > integration-tests/src/main/resources/config.yml
+      - name: Run and verify integration tests
+        run: ./mvnw clean compile test-compile failsafe:integration-test failsafe:verify -P aws-sso
+      - name: Open an issue on failure
+        if: ${{ failure() && github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Failed server integration tests ($(date +'%Y-%m-%d'))" \
+            --body "Workflow **${{ github.workflow }}** failed. See the run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

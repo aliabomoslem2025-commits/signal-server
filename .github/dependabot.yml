@@ -1,0 +1,43 @@
+version: 2
+updates:
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: monthly
+  groups:
+    minor-actions-dependencies:
+      # GitHub Actions: Only group minor and patch updates (we want to carefully review major updates)
+      update-types: [ minor, patch ]
+
+- package-ecosystem: maven
+  directories: [ "**/*" ]
+  schedule:
+    interval: monthly
+  ignore:
+    # Only patch updates don't require coordination with the deployed database
+    - dependency-name: "org.foundationdb:fdb-java"
+      update-types:
+        - version-update:semver-major
+        - version-update:semver-minor
+      # Ignore the latest pre-release version
+      versions: ["<=7.3.79"]
+
+    # Temporary exclusions, pending upstream fixes
+    #  https://github.com/dropwizard/dropwizard/pull/11273
+    - dependency-name: "ch.qos.logback:*"
+      versions: [">=1.6.0"]
+    # https://github.com/jetty/jetty.project/issues/15657
+    - dependency-name: "org.eclipse.jetty:*"
+      versions: ["<=12.1.14"]
+    - dependency-name: "org.eclipse.jetty.ee10:*"
+      versions: ["<=12.1.14"]
+
+    # Dependency convergence sentinels, pinned to specific versions
+    - dependency-name: "tools.jackson.core:jackson-databind"
+    - dependency-name: "com.squareup.okio:okio-jvm"
+
+  groups:
+    minor-java-dependencies:
+      # Java: Only group minor and patch updates (we want to carefully review major updates)
+      update-types: [ minor, patch ]
+

@@ -1,0 +1,293 @@
+/*
+ * Copyright 2025 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.grpc;
+
+import static org.whispersystems.textsecuregcm.grpc.MessagesGrpcHelper.buildMismatchedDevices;
+
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Empty;
+import java.time.Clock;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.Flow;
+import java.util.stream.Collectors;
+import io.grpc.StatusRuntimeException;
+import org.signal.chat.errors.NotFound;
+import org.signal.chat.messages.GetMessagesRequest;
+import org.signal.chat.messages.GetMessagesResponse;
+import org.signal.chat.messages.IndividualRecipientMessageBundle;
+import org.signal.chat.messages.ReportMessageRequest;
+import org.signal.chat.messages.ReportMessageResponse;
+import org.signal.chat.messages.SendAuthenticatedSenderMessageRequest;
+import org.signal.chat.messages.SendMessageAuthenticatedSenderResponse;
+import org.signal.chat.messages.SendMessageType;
+import org.signal.chat.messages.SendSyncMessageRequest;
+import org.signal.chat.messages.SimpleMessagesGrpc;
+import org.whispersystems.textsecuregcm.auth.grpc.AuthenticatedDevice;
+import org.whispersystems.textsecuregcm.auth.grpc.AuthenticationUtil;
+import org.whispersystems.textsecuregcm.controllers.MessageDeliveryNotAllowedException;
+import org.whispersystems.textsecuregcm.controllers.MismatchedDevicesException;
+import org.whispersystems.textsecuregcm.controllers.RateLimitExceededException;
+import org.whispersystems.textsecuregcm.entities.MessageProtos;
+import org.whispersystems.textsecuregcm.identity.AciServiceIdentifier;
+import org.whispersystems.textsecuregcm.identity.ServiceIdentifier;
+import org.whispersystems.textsecuregcm.limits.CardinalityEstimator;
+import org.whispersystems.textsecuregcm.limits.RateLimiters;
+import org.whispersystems.textsecuregcm.push.MessageSender;
+import org.whispersystems.textsecuregcm.push.MessageTooLargeException;
+import org.whispersystems.textsecuregcm.spam.GrpcChallengeResponse;
+import org.whispersystems.textsecuregcm.spam.MessageType;
+import org.whispersystems.textsecuregcm.spam.SpamCheckResult;
+import org.whispersystems.textsecuregcm.spam.SpamChecker;
+import org.whispersystems.textsecuregcm.storage.Account;
+import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.Device;
+import org.whispersystems.textsecuregcm.storage.PhoneNumberIdentifiers;
+import org.whispersystems.textsecuregcm.storage.ReportMessageHelper;
+import org.whispersystems.textsecuregcm.storage.ReportMessageManager;
+import org.whispersystems.textsecuregcm.util.UUIDUtil;
+import reactor.adapter.JdkFlowAdapter;
+import reactor.core.publisher.Flux;
+import javax.annotation.Nullable;
+
+public class MessagesGrpcService extends SimpleMessagesGrpc.MessagesImplBase {
+
+  private final AccountsManager accountsManager;
+  private final ReportMessageManager reportMessageManager;
+  private final PhoneNumberIdentifiers phoneNumberIdentifiers;
+  private final RateLimiters rateLimiters;
+  private final MessageSender messageSender;
+  private final CardinalityEstimator messageByteLimitEstimator;
+  private final SpamChecker spamChecker;
+  private final MessageDispatcher messageDispatcher;
+  private final Clock clock;
+
+  private static final SendMessageAuthenticatedSenderResponse SEND_MESSAGE_SUCCESS_RESPONSE =
+      SendMessageAuthenticatedSenderResponse.newBuilder().setSuccess(Empty.getDefaultInstance()).build();
+
+  public MessagesGrpcService(final AccountsManager accountsManager,
+      final ReportMessageManager reportMessageManager,
+      final PhoneNumberIdentifiers phoneNumberIdentifiers,
+      final RateLimiters rateLimiters,
+      final MessageSender messageSender,
+      final CardinalityEstimator messageByteLimitEstimator,
+      final SpamChecker spamChecker,
+      final MessageDispatcher messageDispatcher,
+      final Clock clock) {
+
+    this.accountsManager = accountsManager;
+    this.reportMessageManager = reportMessageManager;
+    this.phoneNumberIdentifiers = phoneNumberIdentifiers;
+    this.rateLimiters = rateLimiters;
+    this.messageSender = messageSender;
+    this.messageByteLimitEstimator = messageByteLimitEstimator;
+    this.spamChecker = spamChecker;
+    this.messageDispatcher = messageDispatcher;
+    this.clock = clock;
+  }
+
+  @Override
+  public Flow.Publisher<GetMessagesResponse> getMessages(final Flow.Publisher<GetMessagesRequest> request) throws Exception {
+    final AuthenticatedDevice authenticatedDevice = AuthenticationUtil.requireAuthenticatedDevice();
+    final Account account = accountsManager
+        .getByAccountIdentifier(authenticatedDevice.accountIdentifier())
+        .orElseThrow(() -> GrpcExceptions.invalidCredentials("invalid credentials"));
+    final Device device = account.getDevice(authenticatedDevice.deviceId())
+        .orElseThrow(() -> GrpcExceptions.invalidCredentials("invalid credentials"));
+    final String userAgent = RequestAttributesUtil.getUserAgent().orElse(null);
+
+    final Flux<GetMessagesRequest> requestFlux = JdkFlowAdapter.flowPublisherToFlux(request);
+
+    return JdkFlowAdapter.publisherToFlowPublisher(requestFlux.switchOnFirst((firstSignal, flux) -> {
+      @Nullable final GetMessagesRequest streamRequest = firstSignal.get();
+      if (streamRequest == null) {
+        // Just forward the error or completion signal
+        return flux.then().cast(GetMessagesResponse.class);
+      }
+      if (!streamRequest.hasOptions()) {
+        throw GrpcExceptions.fieldViolation("request", "the first request must be GetMessageOptions");
+      }
+      final boolean dropStories = streamRequest.getOptions().getDropStories();
+      return messageDispatcher.getMessages(dropStories, userAgent, account, device,
+          flux.skip(1).map(MessagesGrpcService::extractAckGuid));
+    }));
+  }
+
+  private static UUID extractAckGuid(final GetMessagesRequest ack) throws StatusRuntimeException {
+    if (!ack.hasServerGuidAck()) {
+      throw GrpcExceptions.fieldViolation("request", "All non-initial GetMessageRequests must contain a server_guid_ack");
+    }
+    try {
+      return UUIDUtil.fromByteString(ack.getServerGuidAck());
+    } catch (final IllegalArgumentException e) {
+      throw GrpcExceptions.fieldViolation("server_guid_ack", "invalid server_guid_ack");
+    }
+  }
+
+
+  @Override
+  public SendMessageAuthenticatedSenderResponse sendMessage(final SendAuthenticatedSenderMessageRequest request)
+      throws RateLimitExceededException {
+
+    final AuthenticatedDevice authenticatedDevice = AuthenticationUtil.requireAuthenticatedDevice();
+    final AciServiceIdentifier senderServiceIdentifier = new AciServiceIdentifier(authenticatedDevice.accountIdentifier());
+    final Account sender = accountsManager.getByServiceIdentifier(senderServiceIdentifier)
+        .orElseThrow(() -> GrpcExceptions.invalidCredentials("invalid credentials"));
+
+    final ServiceIdentifier destinationServiceIdentifier =
+        GrpcServiceIdentifierUtil.fromGrpcServiceIdentifier(request.getDestination());
+
+    if (sender.isIdentifiedBy(destinationServiceIdentifier)) {
+      throw GrpcExceptions.invalidArguments("use `sendSyncMessage` to send messages to own account");
+    }
+
+    final Optional<Account> maybeDestination = accountsManager.getByServiceIdentifier(destinationServiceIdentifier);
+    if (maybeDestination.isEmpty()) {
+      return SendMessageAuthenticatedSenderResponse.newBuilder()
+          .setDestinationNotFound(NotFound.getDefaultInstance())
+          .build();
+    }
+    final Account destination = maybeDestination.get();
+
+    rateLimiters.getMessagesLimiter().validate(authenticatedDevice.accountIdentifier(), destination.getAccountIdentifier());
+
+    return sendMessage(destination,
+        destinationServiceIdentifier,
+        authenticatedDevice,
+        MessageType.INDIVIDUAL_IDENTIFIED_SENDER,
+        request.getMessages(),
+        request.getEphemeral(),
+        request.getUrgent());
+  }
+
+  @Override
+  public SendMessageAuthenticatedSenderResponse sendSyncMessage(final SendSyncMessageRequest request)
+      throws RateLimitExceededException {
+
+    final AuthenticatedDevice authenticatedDevice = AuthenticationUtil.requireAuthenticatedDevice();
+    final AciServiceIdentifier senderServiceIdentifier = new AciServiceIdentifier(authenticatedDevice.accountIdentifier());
+    final Account sender = accountsManager.getByServiceIdentifier(senderServiceIdentifier)
+        .orElseThrow(() -> GrpcExceptions.invalidCredentials("invalid credentials"));
+
+    return sendMessage(sender,
+        senderServiceIdentifier,
+        authenticatedDevice,
+        MessageType.SYNC,
+        request.getMessages(),
+        false,
+        request.getUrgent());
+  }
+
+  private SendMessageAuthenticatedSenderResponse sendMessage(final Account destination,
+      final ServiceIdentifier destinationServiceIdentifier,
+      final AuthenticatedDevice sender,
+      final MessageType messageType,
+      final IndividualRecipientMessageBundle messages,
+      final boolean ephemeral,
+      final boolean urgent) throws RateLimitExceededException {
+
+    try {
+      final int totalPayloadLength = messages.getMessagesMap().values().stream()
+          .mapToInt(message -> message.getPayload().size())
+          .sum();
+
+      rateLimiters.getInboundMessageBytes().validate(destinationServiceIdentifier.uuid(), totalPayloadLength);
+    } catch (final RateLimitExceededException e) {
+      messageByteLimitEstimator.add(destinationServiceIdentifier.uuid().toString());
+      throw e;
+    }
+
+    final SpamCheckResult<GrpcChallengeResponse> spamCheckResult =
+        spamChecker.checkForIndividualRecipientSpamGrpc(messageType,
+            Optional.of(sender),
+            Optional.of(destination),
+            destinationServiceIdentifier);
+
+    if (spamCheckResult.response().isPresent()) {
+      return SendMessageAuthenticatedSenderResponse.newBuilder()
+          .setChallengeRequired(spamCheckResult.response().get().getResponseOrThrowStatus())
+          .build();
+    }
+
+    final Map<Byte, MessageProtos.Envelope> messagesByDeviceId = messages.getMessagesMap().entrySet()
+        .stream()
+        .collect(Collectors.toMap(
+            entry -> DeviceIdUtil.validate(entry.getKey()),
+            entry -> {
+              final MessageProtos.Envelope.Builder envelopeBuilder = MessageProtos.Envelope.newBuilder()
+                  .setType(getEnvelopeType(entry.getValue().getType()))
+                  .setClientTimestamp(messages.getTimestamp())
+                  .setServerTimestamp(clock.millis())
+                  .setDestinationServiceId(destinationServiceIdentifier.toCompactByteString())
+                  .setSourceServiceId(new AciServiceIdentifier(sender.accountIdentifier()).toCompactByteString())
+                  .setSourceDevice(sender.deviceId())
+                  .setEphemeral(ephemeral)
+                  .setUrgent(urgent)
+                  .setContent(entry.getValue().getPayload());
+
+              spamCheckResult.token().ifPresent(reportSpamToken ->
+                  envelopeBuilder.setReportSpamToken(ByteString.copyFrom(reportSpamToken)));
+
+              return envelopeBuilder.build();
+            }
+        ));
+
+    final Map<Byte, Integer> registrationIdsByDeviceId = messages.getMessagesMap().entrySet().stream()
+        .collect(Collectors.toMap(
+            entry -> entry.getKey().byteValue(),
+            entry -> entry.getValue().getRegistrationId()));
+
+    try {
+      messageSender.sendMessages(destination,
+          destinationServiceIdentifier,
+          messagesByDeviceId,
+          registrationIdsByDeviceId,
+          messageType == MessageType.SYNC ? Optional.of(sender.deviceId()) : Optional.empty(),
+          RequestAttributesUtil.getUserAgent().orElse(null));
+
+      return SEND_MESSAGE_SUCCESS_RESPONSE;
+    } catch (final MismatchedDevicesException e) {
+      return SendMessageAuthenticatedSenderResponse.newBuilder()
+          .setMismatchedDevices(buildMismatchedDevices(destinationServiceIdentifier, e.getMismatchedDevices()))
+          .build();
+    } catch (final MessageTooLargeException e) {
+      throw GrpcExceptions.invalidArguments("message too large");
+    } catch (final MessageDeliveryNotAllowedException e) {
+      throw GrpcExceptions.unavailable();
+    }
+  }
+
+  private static MessageProtos.Envelope.Type getEnvelopeType(final SendMessageType type) {
+    return switch (type) {
+      case DOUBLE_RATCHET -> MessageProtos.Envelope.Type.CIPHERTEXT;
+      case PREKEY_MESSAGE -> MessageProtos.Envelope.Type.PREKEY_BUNDLE;
+      case PLAINTEXT_CONTENT -> MessageProtos.Envelope.Type.PLAINTEXT_CONTENT;
+      case UNIDENTIFIED_SENDER ->
+          throw GrpcExceptions.invalidArguments("illegal envelope type for identified sends");
+      case UNSPECIFIED, UNRECOGNIZED ->
+          throw GrpcExceptions.invalidArguments("unrecognized envelope type");
+    };
+  }
+
+  @Override
+  public ReportMessageResponse reportMessage(final ReportMessageRequest request) {
+    final ServiceIdentifier sourceServiceIdentifier =
+        GrpcServiceIdentifierUtil.fromGrpcServiceIdentifier(request.getSourceServiceIdentifier());
+
+    ReportMessageHelper.reportMessage(
+        sourceServiceIdentifier,
+        new AciServiceIdentifier(AuthenticationUtil.requireAuthenticatedDevice().accountIdentifier()),
+        UUIDUtil.fromByteString(request.getMessageGuid()),
+        request.getReportSpamToken().isEmpty() ? null : request.getReportSpamToken().toByteArray(),
+        RequestAttributesUtil.getUserAgent().orElse(null),
+        accountsManager,
+        phoneNumberIdentifiers,
+        reportMessageManager);
+
+    return ReportMessageResponse.getDefaultInstance();
+  }
+}

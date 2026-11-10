@@ -1,0 +1,72 @@
+name: Service CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - gh-pages
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    timeout-minutes: 20
+
+    services:
+      foundationdb0:
+        # Note: this should generally match the version of the FoundationDB SERVER deployed in production; no need to
+        # bump it purely to match the CLIENT version
+        image: foundationdb/foundationdb:7.3.68
+        options: --name foundationdb0
+      foundationdb1:
+        # Note: this should generally match the version of the FoundationDB SERVER deployed in production; no need to
+        # bump it purely to match the CLIENT version
+        image: foundationdb/foundationdb:7.3.68
+        options: --name foundationdb1
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install APT packages
+        # ca-certificates: required for AWS CRT client
+        run: |
+          apt update
+          # Maven Wrapper requires `unzip`; see https://github.com/apache/maven-wrapper/issues/425
+          # setup-java requires gpg
+          apt install -y ca-certificates curl gpg unzip
+          # Add Docker's official GPG key:
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add Docker repository to apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+            tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # ca-certificates: required for AWS CRT client
+          apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ca-certificates
+      - name: Set up JDK
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version-file: .java-version
+          cache: 'maven'
+        env:
+          # work around an issue with actions/runner setting an incorrect HOME in containers, which breaks maven caching
+          # https://github.com/actions/setup-java/issues/356
+          HOME: /root
+      - name: Configure FoundationDB0 database
+        run: docker exec foundationdb0 /usr/bin/fdbcli --exec 'configure new single memory'
+      - name: Configure FoundationDB1 database
+        run: docker exec foundationdb1 /usr/bin/fdbcli --exec 'configure new single memory'
+      - name: Download and install FoundationDB client
+        run: |
+          ./mvnw -e -B -Pexclude-spam-filter -pl service download:wget@install-foundationdb-client-library
+          cp service/target/jib-extra/usr/lib/libfdb_c.so /usr/lib/libfdb_c.x86_64.so
+          ldconfig
+      - name: Build with Maven
+        run: ./mvnw -e -B -Pprepull-testcontainers-images clean verify -DfoundationDb.serviceContainerNamePrefix=foundationdb

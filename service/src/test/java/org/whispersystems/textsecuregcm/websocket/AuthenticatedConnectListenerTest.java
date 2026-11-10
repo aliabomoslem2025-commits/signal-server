@@ -1,0 +1,159 @@
+/*
+ * Copyright 2025 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.websocket;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyByte;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.whispersystems.textsecuregcm.asn.AsnInfoProvider;
+import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
+import org.whispersystems.textsecuregcm.auth.DisconnectionRequestListener;
+import org.whispersystems.textsecuregcm.auth.DisconnectionRequestManager;
+import org.whispersystems.textsecuregcm.identity.IdentityType;
+import org.whispersystems.textsecuregcm.metrics.MessageMetrics;
+import org.whispersystems.textsecuregcm.storage.Account;
+import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.ClientReleaseManager;
+import org.whispersystems.textsecuregcm.storage.Device;
+import org.whispersystems.websocket.WebSocketClient;
+import org.whispersystems.websocket.session.WebSocketSessionContext;
+
+class AuthenticatedConnectListenerTest {
+
+  private AccountsManager accountsManager;
+  private DisconnectionRequestManager disconnectionRequestManager;
+
+  private WebSocketConnection authenticatedWebSocketConnection;
+  private AuthenticatedConnectListener authenticatedConnectListener;
+
+  private Account authenticatedAccount;
+  private WebSocketClient webSocketClient;
+  private WebSocketSessionContext webSocketSessionContext;
+
+  private static final UUID ACCOUNT_IDENTIFIER = UUID.randomUUID();
+  private static final byte DEVICE_ID = Device.PRIMARY_ID;
+
+  @BeforeEach
+  void setUpBeforeEach() {
+    accountsManager = mock(AccountsManager.class);
+    disconnectionRequestManager = mock(DisconnectionRequestManager.class);
+
+    authenticatedWebSocketConnection = mock(WebSocketConnection.class);
+
+    authenticatedConnectListener = new AuthenticatedConnectListener(accountsManager,
+        disconnectionRequestManager,
+        () -> mock(AsnInfoProvider.class),
+        mock(ClientReleaseManager.class),
+        mock(MessageMetrics.class),
+        (_, _, _) -> authenticatedWebSocketConnection);
+
+    final Device device = mock(Device.class);
+    when(device.getId()).thenReturn(DEVICE_ID);
+
+    authenticatedAccount = mock(Account.class);
+    when(authenticatedAccount.getAccountIdentifier()).thenReturn(ACCOUNT_IDENTIFIER);
+    when(authenticatedAccount.getDevice(DEVICE_ID)).thenReturn(Optional.of(device));
+
+    webSocketClient = mock(WebSocketClient.class);
+
+    webSocketSessionContext = mock(WebSocketSessionContext.class);
+    when(webSocketSessionContext.getClient()).thenReturn(webSocketClient);
+  }
+
+  @Test
+  void onWebSocketConnectAuthenticated() {
+    when(webSocketSessionContext.getAuthenticated()).thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+    when(webSocketSessionContext.getAuthenticated(AuthenticatedDevice.class))
+        .thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+
+    when(accountsManager.getByAccountIdentifier(ACCOUNT_IDENTIFIER)).thenReturn(Optional.of(authenticatedAccount));
+
+    authenticatedConnectListener.onWebSocketConnect(webSocketSessionContext);
+
+    final ArgumentCaptor<DisconnectionRequestListener> disconnectListener = ArgumentCaptor.forClass(DisconnectionRequestListener.class);
+    final ArgumentCaptor<WebSocketSessionContext.WebSocketEventListener> closeListener =
+        ArgumentCaptor.forClass(WebSocketSessionContext.WebSocketEventListener.class);
+    verify(disconnectionRequestManager).addListener(eq(ACCOUNT_IDENTIFIER), eq(DEVICE_ID), disconnectListener.capture());
+    // We expect one call from AuthenticatedConnectListener itself and one from OpenWebSocketCounter
+    verify(webSocketSessionContext, times(2)).addWebsocketClosedListener(closeListener.capture());
+    verify(authenticatedWebSocketConnection).start();
+
+    // Verify that if we run the close listeners, the disconnection listener gets removed
+    closeListener.getAllValues()
+        .forEach(c -> c.onWebSocketClose(webSocketSessionContext, 1011, "test"));
+    verify(disconnectionRequestManager).removeListener(ACCOUNT_IDENTIFIER, DEVICE_ID, disconnectListener.getValue());
+  }
+
+  @Test
+  void onWebSocketConnectAuthenticatedAccountNotFound() {
+    when(webSocketSessionContext.getAuthenticated()).thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+    when(webSocketSessionContext.getAuthenticated(AuthenticatedDevice.class))
+        .thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+
+    when(accountsManager.getByAccountIdentifier(ACCOUNT_IDENTIFIER)).thenReturn(Optional.empty());
+
+    authenticatedConnectListener.onWebSocketConnect(webSocketSessionContext);
+
+    verify(webSocketClient).close(eq(1011), anyString());
+
+    verify(disconnectionRequestManager, never()).addListener(any(), anyByte(), any());
+    // We expect one call from OpenWebSocketCounter, but none from AuthenticatedConnectListener itself
+    verify(webSocketSessionContext, times(1)).addWebsocketClosedListener(any());
+    verify(authenticatedWebSocketConnection, never()).start();
+  }
+
+  @Test
+  void onWebSocketConnectAuthenticatedStartException() {
+    when(webSocketSessionContext.getAuthenticated()).thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+    when(webSocketSessionContext.getAuthenticated(AuthenticatedDevice.class))
+        .thenReturn(new AuthenticatedDevice(ACCOUNT_IDENTIFIER, DEVICE_ID, Instant.now()));
+
+    when(accountsManager.getByAccountIdentifier(ACCOUNT_IDENTIFIER)).thenReturn(Optional.of(authenticatedAccount));
+    doThrow(new RuntimeException()).when(authenticatedWebSocketConnection).start();
+
+    authenticatedConnectListener.onWebSocketConnect(webSocketSessionContext);
+
+    final ArgumentCaptor<DisconnectionRequestListener> disconnectListener = ArgumentCaptor.forClass(DisconnectionRequestListener.class);
+    final ArgumentCaptor<WebSocketSessionContext.WebSocketEventListener> closeListener =
+        ArgumentCaptor.forClass(WebSocketSessionContext.WebSocketEventListener.class);
+
+    // We expect one call from OpenWebSocketCounter and one from AuthenticatedConnectListener itself
+    verify(webSocketSessionContext, times(2)).addWebsocketClosedListener(closeListener.capture());
+    verify(disconnectionRequestManager).addListener(eq(ACCOUNT_IDENTIFIER), eq(DEVICE_ID), disconnectListener.capture());
+    verify(authenticatedWebSocketConnection).start();
+
+    verify(webSocketClient).close(eq(1011), anyString());
+
+    // Verify that if we run the close listeners, the disconnection listener gets removed
+    closeListener.getAllValues()
+        .forEach(c -> c.onWebSocketClose(webSocketSessionContext, 1011, "test"));
+    verify(disconnectionRequestManager).removeListener(ACCOUNT_IDENTIFIER, DEVICE_ID, disconnectListener.getValue());
+  }
+
+  @Test
+  void onWebSocketConnectUnauthenticated() {
+    authenticatedConnectListener.onWebSocketConnect(webSocketSessionContext);
+
+    verify(disconnectionRequestManager, never()).addListener(any(), anyByte(), any());
+    // We expect one call from OpenWebSocketCounter, but none from AuthenticatedConnectListener itself
+    verify(webSocketSessionContext, times(1)).addWebsocketClosedListener(any());
+    verify(authenticatedWebSocketConnection, never()).start();
+  }
+}

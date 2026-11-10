@@ -1,0 +1,82 @@
+/*
+ * Copyright 2024 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+package org.whispersystems.textsecuregcm.spam;
+
+import jakarta.ws.rs.container.ContainerRequestContext;
+import java.util.Optional;
+import org.whispersystems.textsecuregcm.entities.UpdateVerificationSessionRequest;
+import org.whispersystems.textsecuregcm.registration.VerificationSession;
+import org.whispersystems.textsecuregcm.storage.Account;
+
+public interface RegistrationFraudChecker {
+
+  record VerificationCheck(Optional<VerificationSession> updatedSession, Optional<Float> scoreThreshold) {
+    public static VerificationCheck DEFAULT = new VerificationCheck(Optional.empty(), Optional.empty());
+  }
+
+  /**
+   * Determine if a registration attempt is suspicious
+   *
+   * @param requestContext      The request context for an update verification session attempt
+   * @param verificationSession The target verification session
+   * @param e164                The target phone number
+   * @param request             The information to add to the verification session
+   *
+   * @return a VerificationCheck including updates to the verification session that should be sent to the caller
+   * along with other constraints to enforce when evaluating the UpdateVerificationSessionRequest
+   */
+  VerificationCheck checkVerificationAttempt(
+      final ContainerRequestContext requestContext,
+      final VerificationSession verificationSession,
+      final String e164,
+      final UpdateVerificationSessionRequest request);
+
+  /**
+   * Determine if an attempt to send a verification code is suspicious
+   *
+   * @param requestContext      The request context for a "send code" attempt
+   * @param verificationSession The target verification session
+   * @param e164                The target phone number
+   *
+   * @return a VerificationCheck including updates to the verification session that should be sent to the caller
+   * along with other constraints to enforce when evaluating the request to send a verification code
+   */
+  VerificationCheck checkSendVerificationCodeAttempt(
+      final ContainerRequestContext requestContext,
+      final VerificationSession verificationSession,
+      final String e164);
+
+  /**
+   * Handles a completed verification session resulting in a registration.
+   *
+   * @param verificationSessionId The ID of the verification session that resulted in a completed registration
+   * @param createdAccount        The account created at the end of the verification session
+   */
+  void handleVerificationCompleted(final String verificationSessionId, final Account createdAccount);
+
+  static RegistrationFraudChecker noop() {
+    return new RegistrationFraudChecker() {
+
+      @Override
+      public VerificationCheck checkVerificationAttempt(final ContainerRequestContext requestContext,
+          final VerificationSession verificationSession, final String e164,
+          final UpdateVerificationSessionRequest request) {
+
+        return VerificationCheck.DEFAULT;
+      }
+
+      @Override
+      public VerificationCheck checkSendVerificationCodeAttempt(final ContainerRequestContext requestContext,
+          final VerificationSession verificationSession, final String e164) {
+
+        return VerificationCheck.DEFAULT;
+      }
+
+      @Override
+      public void handleVerificationCompleted(final String verificationSessionId, final Account createdAccount) {
+      }
+    };
+  }
+}

@@ -1,0 +1,207 @@
+/*
+ * Copyright 2023 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.grpc;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.google.i18n.phonenumbers.PhoneNumberUtil;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.signal.chat.credentials.AuthCheckResult;
+import org.signal.chat.credentials.CheckSvrCredentialsRequest;
+import org.signal.chat.credentials.CheckSvrCredentialsResponse;
+import org.signal.chat.credentials.CredentialsAnonymousGrpc;
+import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentials;
+import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentialsGenerator;
+import org.whispersystems.textsecuregcm.controllers.RateLimitExceededException;
+import org.whispersystems.textsecuregcm.limits.RateLimiter;
+import org.whispersystems.textsecuregcm.limits.RateLimiters;
+import org.whispersystems.textsecuregcm.storage.Account;
+import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.util.MockUtils;
+import org.whispersystems.textsecuregcm.util.MutableClock;
+import org.whispersystems.textsecuregcm.util.TestRandomUtil;
+
+class CredentialsAnonymousGrpcServiceTest extends
+    SimpleBaseGrpcTest<CredentialsAnonymousGrpcService, CredentialsAnonymousGrpc.CredentialsAnonymousBlockingStub> {
+
+  private static final UUID USER_UUID = UUID.randomUUID();
+
+  private static final String USER_E164 = PhoneNumberUtil.getInstance().format(
+      PhoneNumberUtil.getInstance().getExampleNumber("US"),
+      PhoneNumberUtil.PhoneNumberFormat.E164
+  );
+
+  private static final MutableClock CLOCK = MockUtils.mutableClock(0);
+
+  private static final ExternalServiceCredentialsGenerator SVR_CREDENTIALS_GENERATOR =
+      Mockito.spy(ExternalServiceCredentialsGenerator
+          .builder(TestRandomUtil.nextBytes(32))
+          .withUserDerivationKey(TestRandomUtil.nextBytes(32))
+          .prependUsername(false)
+          .withDerivedUsernameTruncateLength(16)
+          .withClock(CLOCK)
+          .build());
+
+  @Mock
+  private AccountsManager accountsManager;
+
+  @Mock
+  private RateLimiters rateLimiters;
+
+  @Mock
+  private RateLimiter rateLimiter;
+
+  @Override
+  protected CredentialsAnonymousGrpcService createServiceBeforeEachTest() {
+    return new CredentialsAnonymousGrpcService(accountsManager, SVR_CREDENTIALS_GENERATOR, rateLimiters);
+  }
+
+  @BeforeEach
+  public void setup() {
+    final Account account = mock(Account.class);
+    when(account.getAccountIdentifier()).thenReturn(USER_UUID);
+
+    when(accountsManager.getByE164(USER_E164)).thenReturn(Optional.of(account));
+    when(rateLimiters.getBackupAuthCheckLimiter()).thenReturn(rateLimiter);
+  }
+
+  @Test
+  public void testOneMatch() {
+    final UUID user2 = UUID.randomUUID();
+    final UUID user3 = UUID.randomUUID();
+    assertExpectedCredentialCheckResponse(Map.of(
+        token(USER_UUID, day(1)), AuthCheckResult.AUTH_CHECK_RESULT_MATCH,
+        token(user2, day(1)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        token(user3, day(1)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH
+    ), day(2));
+  }
+
+  @Test
+  public void testNoMatch() {
+    final UUID user2 = UUID.randomUUID();
+    final UUID user3 = UUID.randomUUID();
+    assertExpectedCredentialCheckResponse(Map.of(
+        token(user2, day(1)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        token(user3, day(1)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH
+    ), day(2));
+  }
+
+  @Test
+  public void testSomeInvalid() {
+    final UUID user2 = UUID.randomUUID();
+    final UUID user3 = UUID.randomUUID();
+    final ExternalServiceCredentials user1Cred = credentials(USER_UUID, day(1));
+    final ExternalServiceCredentials user2Cred = credentials(user2, day(1));
+    final ExternalServiceCredentials user3Cred = credentials(user3, day(1));
+
+    final String fakeToken = token(new ExternalServiceCredentials(user2Cred.username(), user3Cred.password()));
+    assertExpectedCredentialCheckResponse(Map.of(
+        token(user1Cred), AuthCheckResult.AUTH_CHECK_RESULT_MATCH,
+        token(user2Cred), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        fakeToken, AuthCheckResult.AUTH_CHECK_RESULT_INVALID
+    ), day(2));
+  }
+
+  @Test
+  public void testSomeExpired() {
+    final UUID user2 = UUID.randomUUID();
+    final UUID user3 = UUID.randomUUID();
+    assertExpectedCredentialCheckResponse(Map.of(
+        token(USER_UUID, day(100)), AuthCheckResult.AUTH_CHECK_RESULT_MATCH,
+        token(user2, day(100)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        token(user3, day(10)), AuthCheckResult.AUTH_CHECK_RESULT_INVALID,
+        token(user3, day(20)), AuthCheckResult.AUTH_CHECK_RESULT_INVALID
+    ), day(110));
+  }
+
+  @Test
+  public void testSomeHaveNewerVersions() {
+    final UUID user2 = UUID.randomUUID();
+    final UUID user3 = UUID.randomUUID();
+    assertExpectedCredentialCheckResponse(Map.of(
+        token(USER_UUID, day(10)), AuthCheckResult.AUTH_CHECK_RESULT_INVALID,
+        token(USER_UUID, day(20)), AuthCheckResult.AUTH_CHECK_RESULT_MATCH,
+        token(user2, day(10)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        token(user3, day(20)), AuthCheckResult.AUTH_CHECK_RESULT_NO_MATCH,
+        token(user3, day(10)), AuthCheckResult.AUTH_CHECK_RESULT_INVALID
+    ), day(25));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 11})
+  public void testInvalidPasswordCount(int count) {
+    final CheckSvrCredentialsRequest request = CheckSvrCredentialsRequest.newBuilder()
+        .setNumber(USER_E164)
+        .addAllPasswords(IntStream.range(0, count).mapToObj(_ -> token(UUID.randomUUID(), day(10))).toList())
+        .build();
+    final StatusRuntimeException status = assertThrows(StatusRuntimeException.class,
+        () -> unauthenticatedServiceStub().checkSvrCredentials(request));
+    assertEquals(Status.INVALID_ARGUMENT.getCode(), status.getStatus().getCode());
+  }
+
+  @Test
+  void checkSvrCredentialsRateLimited() throws RateLimitExceededException {
+    final Duration retryAfter = Duration.ofSeconds(11);
+
+    doThrow(new RateLimitExceededException(retryAfter))
+        .when(rateLimiter).validate(anyString());
+
+    //noinspection ResultOfMethodCallIgnored
+    GrpcTestUtils.assertRateLimitExceeded(retryAfter,
+        () -> unauthenticatedServiceStub().checkSvrCredentials(CheckSvrCredentialsRequest.newBuilder()
+            .setNumber(USER_E164)
+            .addPasswords(token(USER_UUID, day(1)))
+            .build()),
+        accountsManager);
+  }
+
+  private void assertExpectedCredentialCheckResponse(
+      final Map<String, AuthCheckResult> expected,
+      final long nowMillis) {
+    CLOCK.setTimeMillis(nowMillis);
+    final CheckSvrCredentialsRequest request = CheckSvrCredentialsRequest.newBuilder()
+        .setNumber(USER_E164)
+        .addAllPasswords(expected.keySet())
+        .build();
+    final CheckSvrCredentialsResponse response = unauthenticatedServiceStub().checkSvrCredentials(request);
+    final Map<String, AuthCheckResult> matchesMap = response.getMatchesMap();
+    assertEquals(expected, matchesMap);
+  }
+
+  private static String token(final UUID uuid, final long timeMillis) {
+    return token(credentials(uuid, timeMillis));
+  }
+
+  private static String token(final ExternalServiceCredentials credentials) {
+    return credentials.username() + ":" + credentials.password();
+  }
+
+  private static ExternalServiceCredentials credentials(final UUID uuid, final long timeMillis) {
+    CLOCK.setTimeMillis(timeMillis);
+    return SVR_CREDENTIALS_GENERATOR.generateForUuid(uuid);
+  }
+
+  private static long day(final int n) {
+    return Duration.ofDays(n).toMillis();
+  }
+}

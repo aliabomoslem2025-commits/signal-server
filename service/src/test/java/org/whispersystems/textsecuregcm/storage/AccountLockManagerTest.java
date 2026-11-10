@@ -1,0 +1,84 @@
+package org.whispersystems.textsecuregcm.storage;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.amazonaws.services.dynamodbv2.AcquireLockOptions;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBLockClient;
+import com.amazonaws.services.dynamodbv2.ReleaseLockOptions;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+class AccountLockManagerTest {
+
+  private AmazonDynamoDBLockClient lockClient;
+
+  private AccountLockManager accountLockManager;
+
+  private static final UUID FIRST_PNI = UUID.randomUUID();
+  private static final UUID SECOND_PNI = UUID.randomUUID();
+  private static final UUID ACI = UUID.randomUUID();
+
+  @BeforeEach
+  void setUp() {
+    lockClient = mock(AmazonDynamoDBLockClient.class);
+    accountLockManager = new AccountLockManager(lockClient);
+  }
+
+  @Test
+  void withLock() throws Exception {
+    accountLockManager.withLock(Set.of(FIRST_PNI, SECOND_PNI), () -> null);
+
+    verify(lockClient, times(2)).acquireLock(any());
+    verify(lockClient, times(2)).releaseLock(any(ReleaseLockOptions.class));
+  }
+
+  @Test
+  void withLockTaskThrowsException() throws InterruptedException {
+    assertThrows(RuntimeException.class, () -> accountLockManager.withLock(Set.of(FIRST_PNI, SECOND_PNI), () -> {
+          throw new RuntimeException();
+    }));
+
+    verify(lockClient, times(2)).acquireLock(any());
+    verify(lockClient, times(2)).releaseLock(any(ReleaseLockOptions.class));
+  }
+
+  @Test
+  void withLockEmptyList() {
+    final Runnable task = mock(Runnable.class);
+
+    assertThrows(IllegalArgumentException.class, () -> accountLockManager.withLock(Collections.emptySet(), () -> null));
+    verify(task, never()).run();
+  }
+
+  @Test
+  void withLockPniAccount() throws Exception {
+    final Account account = mock(Account.class);
+    when(account.getAccountIdentifier()).thenReturn(ACI);
+    when(account.getPhoneNumberIdentifier()).thenReturn(Optional.of(FIRST_PNI));
+
+    accountLockManager.withSingleAccountLock(account, () -> null);
+    verify(lockClient, times(1)).acquireLock(
+        AcquireLockOptions.builder(FIRST_PNI.toString()).withAcquireReleasedLocksConsistently(true).build());
+  }
+
+  @Test
+  void withLockNoPniAccount() throws Exception {
+    final Account account = mock(Account.class);
+    when(account.getAccountIdentifier()).thenReturn(ACI);
+    when(account.getPhoneNumberIdentifier()).thenReturn(Optional.empty());
+
+    accountLockManager.withSingleAccountLock(account, () -> null);
+    verify(lockClient, times(1)).acquireLock(
+        AcquireLockOptions.builder(ACI.toString()).withAcquireReleasedLocksConsistently(true).build());
+  }
+}

@@ -1,0 +1,576 @@
+# Example, relatively minimal, configuration that passes validation (see `io.dropwizard.cli.CheckCommand`)
+#
+# `unset` values will need to be set to work properly.
+# Most other values are technically valid for a local/demonstration environment, but are probably not production-ready.
+
+logging:
+  level: INFO
+  appenders:
+    - type: console
+      threshold: ALL
+      timeZone: UTC
+      target: stdout
+    - type: otlp
+
+tlsKeyStore:
+  password: secret://tlsKeyStore.password
+
+stripe:
+  apiKey: secret://stripe.apiKey
+  idempotencyKeyGenerator: secret://stripe.idempotencyKeyGenerator
+  boostDescription: >
+    Example
+  supportedCurrenciesByPaymentMethod:
+    CARD:
+      - usd
+      - eur
+    SEPA_DEBIT:
+      - eur
+
+braintree:
+  merchantId: unset
+  publicKey: secret://braintree.publicKey
+  privateKey: secret://braintree.privateKey
+  environment: unset
+  graphqlUrl: unset
+  merchantAccounts:
+    # ISO 4217 currency code and its corresponding sub-merchant account
+    'xts': unset
+  supportedCurrenciesByPaymentMethod:
+    PAYPAL:
+      - usd
+  pubSubPublisher:
+    project: example-project
+    topic: example-topic
+    credentialConfiguration: |
+      {
+        "credential": "configuration"
+      }
+
+googlePlayBilling:
+  credentialsJson: |
+    {
+      "credential": "configuration"
+    }
+  packageName: package.name
+  applicationName: test
+  productIdToLevel: {}
+
+appleAppStore:
+  env: SANDBOX
+  bundleId: bundle.name
+  appAppleId: 12345
+  issuerId: abcdefg
+  keyId: abcdefg
+  encodedKey: secret://appleAppStore.encodedKey
+  subscriptionGroupId: example_subscriptionGroupId
+  productIdToLevel: {}
+  appleRootCerts: []
+
+appleDeviceCheck:
+  production: false
+  teamId: 0123456789
+  bundleId: bundle.name
+
+deviceCheck:
+  backupRedemptionDuration: P30D
+
+dynamoDbClient:
+  region: us-west-2 # AWS Region
+
+dynamoDbTables:
+  accounts:
+    tableName: Example_Accounts
+    phoneNumberTableName: Example_Accounts_PhoneNumbers
+    phoneNumberIdentifierTableName: Example_Accounts_PhoneNumberIdentifiers
+    usernamesTableName: Example_Accounts_Usernames
+    usedLinkDeviceTokensTableName: Example_Accounts_UsedLinkDeviceTokens
+  appleDeviceChecks:
+    tableName: Example_AppleDeviceChecks
+  appleDeviceCheckPublicKeys:
+    tableName: Example_AppleDeviceCheckPublicKeys
+  backups:
+    tableName: Example_Backups
+  changeNumberWaitingPeriods:
+    tableName: Example_ChangeNumberWaitingPeriods
+  clientReleases:
+    tableName: Example_ClientReleases
+  deletedAccounts:
+    tableName: Example_DeletedAccounts
+  deletedAccountsLock:
+    tableName: Example_DeletedAccountsLock
+  donationPermits:
+    tableName: Example_DonationPermits
+    expiration: P7D # Duration of time until rows expire
+  issuedReceipts:
+    tableName: Example_IssuedReceipts
+    generator: abcdefg12345678= # random base64-encoded binary sequence
+    maxReceiptsPerSubscriptionPayment:
+      STRIPE: 1
+      BRAINTREE: 1
+      GOOGLE_PLAY_BILLING: 1
+      APPLE_APP_STORE: 1
+  ecKeys:
+    tableName: Example_Keys
+  ecSignedPreKeys:
+    tableName: Example_EC_Signed_Pre_Keys
+  pagedPqKeys:
+    tableName: Example_PQ_Paged_Keys
+  pqLastResortKeys:
+    tableName: Example_PQ_Last_Resort_Keys
+  messages:
+    tableName: Example_Messages
+    expiration: P30D # Duration of time until rows expire
+  onetimeDonations:
+    tableName: Example_OnetimeDonations
+    expiration: P90D
+  phoneNumberIdentifiers:
+    tableName: Example_PhoneNumberIdentifiers
+  profileAvatars:
+    tableName: Example_ProfileAvatars
+  profiles:
+    tableName: Example_Profiles
+  profilesV2:
+    tableName: Example_ProfilesV2
+  pushChallenge:
+    tableName: Example_PushChallenge
+  redeemedReceipts:
+    tableName: Example_RedeemedReceipts
+  registrationRecovery:
+    tableName: Example_RegistrationRecovery
+    expiration: P300D # Duration of time until rows expire
+  remoteConfig:
+    tableName: Example_RemoteConfig
+  reportMessage:
+    tableName: Example_ReportMessage
+  sandboxAccounts:
+    tableName: Example_SandboxAccounts
+  scheduledJobs:
+    tableName: Example_ScheduledJobs
+    expiration: P7D
+  subscriptions:
+    tableName: Example_Subscriptions
+  verificationSessions:
+    tableName: Example_VerificationSessions
+
+pagedSingleUseKEMPreKeyStore:
+  bucket: preKeyBucket # S3 Bucket name
+  region: us-west-2    # AWS region
+
+cacheCluster: # Redis server configuration for cache cluster
+  configurationUri: redis://redis.example.com:6379/
+
+pubsub: # Redis server configuration for pubsub cluster
+  uri: redis://redis.example.com:6379/
+
+pushSchedulerCluster: # Redis server configuration for push scheduler cluster
+  configurationUri: redis://redis.example.com:6379/
+
+rateLimitersCluster: # Redis server configuration for rate limiters cluster
+  configurationUri: redis://redis.example.com:6379/
+
+directoryV2:
+  client: # Configuration for interfacing with Contact Discovery Service v2 cluster
+    userAuthenticationTokenSharedSecret: secret://directoryV2.client.userAuthenticationTokenSharedSecret
+    userIdTokenSharedSecret: secret://directoryV2.client.userIdTokenSharedSecret
+
+svr2:
+  uri: svr2.example.com
+  userAuthenticationTokenSharedSecret: secret://svr2.userAuthenticationTokenSharedSecret
+  userIdTokenSharedSecret: secret://svr2.userIdTokenSharedSecret
+  svrCaCertificates:
+    - |
+      -----BEGIN CERTIFICATE-----
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      AAAAAAAAAAAAAAAAAAAA
+      -----END CERTIFICATE-----
+
+svrb:
+  uri: svrb.example.com
+  userAuthenticationTokenSharedSecret: secret://svrb.userAuthenticationTokenSharedSecret
+  userIdTokenSharedSecret: secret://svrb.userIdTokenSharedSecret
+  svrCaCertificates:
+    - |
+      -----BEGIN CERTIFICATE-----
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      AAAAAAAAAAAAAAAAAAAA
+      -----END CERTIFICATE-----
+
+attachments:
+  maxAttachmentUploadSizeInBytes: 1024
+  maxMessageBackupUploadSizeInBytes: 1024
+
+gcpAttachments: # GCP Storage configuration
+  domain: example.com
+  email: user@example.cocm
+  pathPrefix:
+  rsaSigningKey: secret://gcpAttachments.rsaSigningKey
+
+tus:
+  uploadUri: https://example.org/upload
+  userAuthenticationTokenSharedSecret: secret://tus.userAuthenticationTokenSharedSecret
+
+apn: # Apple Push Notifications configuration
+  sandbox: true
+  bundleId: com.example.textsecuregcm
+  keyId: secret://apn.keyId
+  teamId: secret://apn.teamId
+  signingKey: secret://apn.signingKey
+
+fcm: # FCM configuration
+  credentials: secret://fcm.credentials
+
+cdn:
+  bucket: cdn        # S3 Bucket name
+  credentials:
+    accessKeyId: secret://cdn.accessKey
+    secretAccessKey: secret://cdn.accessSecret
+  region: us-west-2  # AWS region
+
+cdn3StorageManager:
+  baseUri: https://storage-manager.example.com
+  clientId: example
+  clientSecret: secret://cdn3StorageManager.clientSecret
+  sourceSchemes:
+    2: gcs
+    3: r2
+
+openTelemetry:
+  enabled: true
+  environment: dev
+  url: http://127.0.0.1:4318/
+
+unidentifiedDelivery:
+  certificate: CgIIAQ==
+  privateKey: secret://unidentifiedDelivery.privateKey
+  expiresDays: 7
+  embedSigner: true
+
+shortCode:
+  baseUrl: https://example.com/shortcodes/
+
+storageService:
+  uri: storage.example.com
+  userAuthenticationTokenSharedSecret: secret://storageService.userAuthenticationTokenSharedSecret
+  storageCaCertificates:
+    - |
+      -----BEGIN CERTIFICATE-----
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+      AAAAAAAAAAAAAAAAAAAA
+      -----END CERTIFICATE-----
+
+callingZkConfigPreV101:
+  serverSecret: secret://callingZkConfigPreV101.serverSecret
+
+callingZkConfig:
+  serverSecret: secret://callingZkConfigV101.serverSecret
+
+chatZkConfig:
+  serverSecret: secret://chatZkConfig.serverSecret
+
+groupsZkConfig:
+  serverPublic: ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyzAB==
+  serverSecret: secret://zkConfig-libsignal-0.42.serverSecret
+
+dynamicConfig:
+  s3Region: a-region
+  s3Bucket: a-bucket
+  objectKey: dynamic-config.yaml
+  maxSize: 100000
+  refreshInterval: PT10S
+
+remoteConfig:
+  globalConfig: # keys and values that are given to clients on GET /v1/config
+    EXAMPLE_KEY: VALUE
+
+paymentsService:
+  userAuthenticationTokenSharedSecret: secret://paymentsService.userAuthenticationTokenSharedSecret
+  paymentCurrencies:
+    # list of symbols for supported currencies
+    - MOB
+  externalClients:
+    fixerApiKey: secret://paymentsService.fixerApiKey
+    coinGeckoApiKey: secret://paymentsService.coinGeckoApiKey
+    coinGeckoCurrencyIds:
+      MOB: mobilecoin
+
+badges:
+  badges:
+    - id: TEST
+      category: other
+      sprites: # exactly 6
+        - sprite-1.png
+        - sprite-2.png
+        - sprite-3.png
+        - sprite-4.png
+        - sprite-5.png
+        - sprite-6.png
+      svg: example.svg
+      svgs:
+        - light: example-light.svg
+          dark: example-dark.svg
+  receiptLevels:
+    ONE_TIME_DONATION: TEST
+
+subscription: # configuration for Stripe subscriptions
+  badgeExpiration: P30D
+  badgeGracePeriod: P15D
+  backupExpiration: P30D
+  backupGracePeriod: P15D
+  backupFreeTierMediaDuration: P30D
+  levels:
+    500:
+      badge: EXAMPLE
+      prices:
+        # list of ISO 4217 currency codes and amounts for the given badge level
+        xts:
+          amount: '10'
+          processorIds:
+            STRIPE: price_example   # stripe Price ID
+            BRAINTREE: plan_example # braintree Plan ID
+
+loginPurchase:
+  playProductId: login_example
+  playOptionId: login_option_example
+  appStoreProductId: login_example
+
+oneTimeDonations:
+  sepaMaximumEuros: '10000'
+  boost:
+    expiration: P90D
+    badge: EXAMPLE
+  gift:
+    expiration: P90D
+    badge: EXAMPLE
+  currencies:
+    # ISO 4217 currency codes and amounts in those currencies
+    xts:
+      minimum: '0.5'
+      gift: '2'
+      boosts:
+        - '1'
+        - '2'
+        - '4'
+        - '8'
+        - '20'
+        - '40'
+
+registrationService:
+  host: registration.example.com
+  port: 443
+  credentialConfigurationJson: |
+    {
+      "example": "example"
+    }
+  identityTokenAudience: https://registration.example.com
+  collationKeySalt: secret://registrationService.collationKeySalt
+  registrationCaCertificate: | # Registration service TLS certificate trust root
+    -----BEGIN CERTIFICATE-----
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    AAAAAAAAAAAAAAAAAAAA
+    -----END CERTIFICATE-----
+
+keyTransparencyService:
+  host: kt.example.com
+  port: 443
+  tlsCertificate: |
+    -----BEGIN CERTIFICATE-----
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    AAAAAAAAAAAAAAAAAAAA
+    -----END CERTIFICATE-----
+  clientCertificate: |
+    -----BEGIN CERTIFICATE-----
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789+abcdefghijklmnopqrstuvwxyz
+    AAAAAAAAAAAAAAAAAAAA
+    -----END CERTIFICATE-----
+  clientPrivateKey: secret://keyTransparencyService.clientPrivateKey
+
+turn:
+  cloudflare:
+    apiToken: secret://turn.cloudflare.apiToken
+    endpoint: https://rtc.live.cloudflare.com/v1/turn/keys/LMNOP/credentials/generate
+    urls:
+      - turn:turn.example.com:80
+    urlsWithIps:
+      - turn:%s
+      - turn:%s:80?transport=tcp
+      - turns:%s:443?transport=tcp
+    requestedCredentialTtl: PT24H
+    clientCredentialTtl: PT12H
+    hostname: turn.cloudflare.example.com
+    numHttpClients: 1
+
+linkDevice:
+  secret: secret://linkDevice.secret
+
+externalRequestFilter:
+  grpcMethods:
+    - com.example.grpc.ExampleService/exampleMethod
+  paths:
+    - /example
+  permittedInternalRanges:
+    - 127.0.0.0/8
+
+idlePrimaryDeviceReminder:
+  minIdleDuration: P30D
+
+grpc:
+  port: 50051
+  websocketPort: 8080
+
+asnTable:
+  s3Region: a-region
+  s3Bucket: a-bucket
+  objectKey: asn.tsv
+  maxSize: 100000
+  refreshInterval: PT10S
+
+callQualitySurvey:
+  pubSubPublisher:
+    project: example-project
+    topic: example-topic
+    credentialConfiguration: |
+      {
+        "credential": "configuration"
+      }
+
+hlrLookup:
+  apiKey: secret://hlrLookup.apiKey
+  apiSecret: secret://hlrLookup.apiSecret
+
+foundationDbMessages:
+  maxWatchesPerClient: 10000
+  transactionTimeout: PT1S
+  transactionRetryLimit: 3
+  batchPriorityTransactionTimeout: PT5S
+  batchPriorityTransactionRetryLimit: 10
+  versionstampCipherKeys:
+    0: secret://foundationDbMessages.versionstampCipherKey.0
+  currentVersionstampCipherKey: 0
+  clusters:
+    "messages-0":
+      clusterFileUrl: http://clusterfiles.example.com/messages-0
+    "messages-1":
+      clusterFileUrl: http://clusterfiles.example.com/messages-1
+    "messages-2":
+      clusterFileUrl: http://clusterfiles.example.com/messages-2
+    "messages-3":
+      clusterFileUrl: http://clusterfiles.example.com/messages-3
+  epochs:
+    0:
+      - messages-0
+      - messages-1
+    1:
+      - messages-0
+      - messages-1
+      - messages-2
+      - messages-3
+
+registrationWebAuthn:
+  relyingPartyId: example.org
+  origins:
+    - https://example.org
+  challengeTtl: PT2M
+  userHandleBlindingSecret: secret://registrationWebAuthn.userHandleBlindingSecret

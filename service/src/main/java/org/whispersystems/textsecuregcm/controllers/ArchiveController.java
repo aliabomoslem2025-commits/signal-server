@@ -1,0 +1,1070 @@
+/*
+ * Copyright 2023 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.controllers;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.net.HttpHeaders;
+import io.dropwizard.auth.Auth;
+import io.micrometer.core.instrument.Tag;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import java.io.IOException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.glassfish.jersey.server.ManagedAsync;
+import org.signal.libsignal.protocol.ecc.ECPublicKey;
+import org.signal.libsignal.zkgroup.InvalidInputException;
+import org.signal.libsignal.zkgroup.backups.BackupAuthCredentialPresentation;
+import org.signal.libsignal.zkgroup.backups.BackupAuthCredentialRequest;
+import org.signal.libsignal.zkgroup.backups.BackupCredentialType;
+import org.signal.libsignal.zkgroup.receipts.ReceiptCredentialPresentation;
+import org.whispersystems.textsecuregcm.auth.AuthenticatedBackupUser;
+import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
+import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentials;
+import org.whispersystems.textsecuregcm.auth.RedemptionRange;
+import org.whispersystems.textsecuregcm.backup.BackupAuthManager;
+import org.whispersystems.textsecuregcm.backup.BackupBadReceiptException;
+import org.whispersystems.textsecuregcm.backup.BackupFailedZkAuthenticationException;
+import org.whispersystems.textsecuregcm.backup.BackupInvalidArgumentException;
+import org.whispersystems.textsecuregcm.backup.BackupManager;
+import org.whispersystems.textsecuregcm.backup.BackupMissingIdCommitmentException;
+import org.whispersystems.textsecuregcm.backup.BackupNotFoundException;
+import org.whispersystems.textsecuregcm.backup.BackupPermissionException;
+import org.whispersystems.textsecuregcm.backup.BackupUploadDescriptor;
+import org.whispersystems.textsecuregcm.backup.BackupWrongCredentialTypeException;
+import org.whispersystems.textsecuregcm.backup.CopyParameters;
+import org.whispersystems.textsecuregcm.backup.CopyResult;
+import org.whispersystems.textsecuregcm.backup.MediaEncryptionParameters;
+import org.whispersystems.textsecuregcm.entities.RemoteAttachment;
+import org.whispersystems.textsecuregcm.metrics.BackupMetrics;
+import org.whispersystems.textsecuregcm.metrics.UserAgentTagUtil;
+import org.whispersystems.textsecuregcm.storage.Account;
+import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.Device;
+import org.whispersystems.textsecuregcm.util.BackupAuthCredentialAdapter;
+import org.whispersystems.textsecuregcm.util.ByteArrayAdapter;
+import org.whispersystems.textsecuregcm.util.ByteArrayBase64UrlAdapter;
+import org.whispersystems.textsecuregcm.util.ECPublicKeyAdapter;
+import org.whispersystems.textsecuregcm.util.ExactlySize;
+
+@Path("/v1/archives")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Archive")
+public class ArchiveController {
+
+  public final static String X_SIGNAL_ZK_AUTH = "X-Signal-ZK-Auth";
+  public final static String X_SIGNAL_ZK_AUTH_SIGNATURE = "X-Signal-ZK-Auth-Signature";
+
+  private final AccountsManager accountsManager;
+  private final BackupAuthManager backupAuthManager;
+  private final BackupManager backupManager;
+  private final BackupMetrics backupMetrics;
+  private final long maxAttachmentSize;
+  private final long maxMessageBackupSize;
+
+  public ArchiveController(
+      final AccountsManager accountsManager,
+      final BackupAuthManager backupAuthManager,
+      final BackupManager backupManager,
+      final BackupMetrics backupMetrics,
+      final long maxAttachmentSize,
+      final long maxMessageBackupSize) {
+
+    this.accountsManager = accountsManager;
+    this.backupAuthManager = backupAuthManager;
+    this.backupManager = backupManager;
+    this.backupMetrics = backupMetrics;
+    this.maxAttachmentSize = maxAttachmentSize;
+    this.maxMessageBackupSize = maxMessageBackupSize;
+  }
+
+  public record SetBackupIdRequest(
+      @Schema(description = """
+          A BackupAuthCredentialRequest containing a blinded encrypted backup-id, encoded in standard padded base64.
+          This backup-id should be used for message backups only, and must have the message backup type set on the
+          credential. If absent, the message credential request will not be updated.
+          """, implementation = String.class)
+      @JsonDeserialize(using = BackupAuthCredentialAdapter.CredentialRequestDeserializer.class)
+      @JsonSerialize(using = BackupAuthCredentialAdapter.CredentialRequestSerializer.class)
+      BackupAuthCredentialRequest messagesBackupAuthCredentialRequest,
+
+      @Schema(description = """
+          A BackupAuthCredentialRequest containing a blinded encrypted backup-id, encoded in standard padded base64.
+          This backup-id should be used for media only, and must have the media type set on the credential. If absent,
+          only the media credential request will not be updated.
+          """, implementation = String.class)
+      @JsonDeserialize(using = BackupAuthCredentialAdapter.CredentialRequestDeserializer.class)
+      @JsonSerialize(using = BackupAuthCredentialAdapter.CredentialRequestSerializer.class)
+      BackupAuthCredentialRequest mediaBackupAuthCredentialRequest) {}
+
+
+  @PUT
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/backupid")
+  @Operation(
+      summary = "Set backup id",
+      description = """
+          Set (blinded) backup-id(s) for the account. Each account may have a single active backup-id for each
+          credential type that can be used to store and retrieve backups. Once the backup-id is set,
+          BackupAuthCredentials can be generated using /v1/archives/auth.
+
+          The blinded backup-id and the key-pair used to blind it should be derived from a recoverable secret.
+          
+          At least one of `messagesBackupAuthCredentialRequest`, `mediaBackupAuthCredentialRequest` must be set.
+          """)
+  @ApiResponse(responseCode = "204", description = "The backup-id was set")
+  @ApiResponse(responseCode = "400", description = "The provided backup auth credential request was invalid")
+  @ApiResponse(responseCode = "403", description = "The device did not have permission to set the backup-id. Only the primary device can set the backup-id for an account")
+  @ApiResponse(responseCode = "429", description = "Rate limited. Too many attempts to change the backup-id have been made")
+  @ManagedAsync
+  public void setBackupId(
+      @Auth final AuthenticatedDevice authenticatedDevice,
+      @Valid @NotNull final SetBackupIdRequest setBackupIdRequest)
+      throws RateLimitExceededException, BackupInvalidArgumentException, BackupPermissionException {
+
+    final Account account = accountsManager.getByAccountIdentifier(authenticatedDevice.accountIdentifier())
+        .orElseThrow(() -> new WebApplicationException(Response.Status.UNAUTHORIZED));
+    final Device device = account.getDevice(authenticatedDevice.deviceId())
+        .orElseThrow(() -> new WebApplicationException(Response.Status.UNAUTHORIZED));
+
+    backupAuthManager
+        .commitBackupId(account, device,
+            Optional.ofNullable(setBackupIdRequest.messagesBackupAuthCredentialRequest),
+            Optional.ofNullable(setBackupIdRequest.mediaBackupAuthCredentialRequest));
+  }
+
+
+  public record BackupIdLimitResponse(
+      @Schema(description = "If true, a call to PUT /v1/archive/backupid may succeed without waiting")
+      boolean hasPermitsRemaining,
+      @Schema(description = "How long to wait before a permit becomes available, in seconds")
+      long retryAfterSeconds) {}
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/backupid/limits")
+  @Operation(
+      summary = "Retrieve limits",
+      description = """
+          Determine whether the backup-id can currently be rotated
+          """)
+  @ApiResponse(responseCode = "200", description = "Successfully retrieved backup-id rotation limits", useReturnTypeSchema = true)
+  @ApiResponse(responseCode = "403", description = "Invalid account authentication")
+  @ManagedAsync
+  public BackupIdLimitResponse checkLimits(@Auth final AuthenticatedDevice authenticatedDevice) {
+    final Account account = accountsManager.getByAccountIdentifier(authenticatedDevice.accountIdentifier())
+        .orElseThrow(() -> new WebApplicationException(Response.Status.UNAUTHORIZED));
+
+    final BackupAuthManager.BackupIdRotationLimit limit = backupAuthManager.checkBackupIdRotationLimit(account);
+    return new BackupIdLimitResponse(limit.hasPermitsRemaining(), limit.nextPermitAvailable().getSeconds());
+  }
+
+  public record RedeemBackupReceiptRequest(
+      @Schema(description = "Presentation of a ZK receipt encoded in standard padded base64", implementation = String.class)
+      @JsonDeserialize(using = Deserializer.class)
+      @NotNull
+      ReceiptCredentialPresentation receiptCredentialPresentation) {
+
+    public static class Deserializer extends JsonDeserializer<ReceiptCredentialPresentation> {
+
+      @Override
+      public ReceiptCredentialPresentation deserialize(JsonParser jsonParser,
+          DeserializationContext deserializationContext) throws IOException {
+        try {
+          return new ReceiptCredentialPresentation(Base64.getDecoder().decode(jsonParser.getValueAsString()));
+        } catch (InvalidInputException e) {
+          throw new IllegalArgumentException(e);
+        }
+      }
+    }
+  }
+
+  @POST
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/redeem-receipt")
+  @Operation(
+      summary = "Redeem receipt",
+      description = """
+          Redeem a receipt acquired from /v1/subscription/{subscriberId}/receipt_credentials to mark the account as
+          eligible for the paid backup tier.
+
+          After successful redemption, subsequent requests to /v1/archive/auth will return credentials with the level on
+          the provided receipt until the expiration time on the receipt.
+
+          Accounts must have an existing backup credential request in order to redeem a receipt. This request will fail
+          if the account has not already set a backup credential request via PUT `/v1/archives/backupid`.
+          """)
+  @ApiResponse(responseCode = "204", description = "The receipt was redeemed")
+  @ApiResponse(responseCode = "400", description = "The provided presentation or receipt was invalid")
+  @ApiResponse(responseCode = "409", description = "The target account does not have a backup-id commitment")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ManagedAsync
+  public Response redeemReceipt(
+      @Auth final AuthenticatedDevice authenticatedDevice,
+      @Valid @NotNull final RedeemBackupReceiptRequest redeemBackupReceiptRequest)
+      throws BackupInvalidArgumentException, BackupMissingIdCommitmentException, BackupBadReceiptException {
+
+    final Account account = accountsManager.getByAccountIdentifier(authenticatedDevice.accountIdentifier())
+        .orElseThrow(() -> new WebApplicationException(Response.Status.UNAUTHORIZED));
+
+    backupAuthManager.redeemReceipt(account, redeemBackupReceiptRequest.receiptCredentialPresentation());
+    return Response.noContent().build();
+  }
+
+  public record BackupAuthCredentialsResponse(
+      @Schema(description = "A map of credential types to lists of BackupAuthCredentials and their validity periods")
+      Map<CredentialType, List<BackupAuthCredential>> credentials) {
+
+    public enum CredentialType {
+      MESSAGES,
+      MEDIA;
+
+      @JsonValue
+      public String toValue() {
+        return this.name().toLowerCase(Locale.ROOT);
+      }
+
+      @JsonCreator
+      public static CredentialType fromValue(String v) {
+        return v == null ? null : CredentialType.valueOf(v.toUpperCase(Locale.ROOT));
+      }
+
+      @VisibleForTesting
+      static CredentialType fromLibsignalType(BackupCredentialType backupCredentialType) {
+        return switch (backupCredentialType) {
+          case MESSAGES -> BackupAuthCredentialsResponse.CredentialType.MESSAGES;
+          case MEDIA -> BackupAuthCredentialsResponse.CredentialType.MEDIA;
+        };
+      }
+    }
+
+    public record BackupAuthCredential(
+        @Schema(description = "A BackupAuthCredential, encoded in standard padded base64")
+        byte[] credential,
+        @Schema(description = "The day on which this credential is valid. Seconds since epoch truncated to day boundary")
+        long redemptionTime) {}
+  }
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/auth")
+  @Operation(
+      summary = "Fetch ZK credentials ",
+      description = """
+          After setting a blinded backup-id with PUT /v1/archives/, this fetches credentials that can be used to perform
+          operations against that backup-id. Clients may (and should) request up to 7 days of credentials at a time.
+
+          The redemptionStart and redemptionEnd seconds must be UTC day aligned, and must not span more than 7 days.
+
+          Each credential contains a receipt level which indicates the backup level the credential is good for. If the
+          account has paid backup access that expires at some point in the provided redemption window, credentials with
+          redemption times after the expiration may be on a lower backup level.
+
+          Clients must validate the receipt level on the credential matches a known receipt level before using it.
+          """)
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BackupAuthCredentialsResponse.class)))
+  @ApiResponse(responseCode = "400", description = "The start/end did not meet alignment/duration requirements")
+  @ApiResponse(responseCode = "404", description = "Could not find an existing blinded backup id")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ManagedAsync
+  public BackupAuthCredentialsResponse getBackupZKCredentials(
+      @Auth AuthenticatedDevice authenticatedDevice,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+      @NotNull @QueryParam("redemptionStartSeconds") Long startSeconds,
+      @NotNull @QueryParam("redemptionEndSeconds") Long endSeconds) throws BackupNotFoundException {
+
+    final RedemptionRange redemptionRange;
+    try {
+      redemptionRange = RedemptionRange.inclusive(Clock.systemUTC(), Instant.ofEpochSecond(startSeconds), Instant.ofEpochSecond(endSeconds));
+    } catch (IllegalArgumentException e) {
+      throw new BadRequestException(e.getMessage());
+    }
+
+    final Account account = accountsManager.getByAccountIdentifier(authenticatedDevice.accountIdentifier())
+        .orElseThrow(() -> new WebApplicationException(Response.Status.UNAUTHORIZED));
+
+    final Map<BackupCredentialType, List<BackupAuthManager.Credential>> credentials =
+        backupAuthManager.getBackupAuthCredentials(account, redemptionRange);
+
+    final Tag platformTag = UserAgentTagUtil.getPlatformTag(userAgent);
+    credentials.forEach((type, credentialList) ->
+        backupMetrics.updateGetCredentialCounter(platformTag, type, credentialList.size()));
+
+    return new BackupAuthCredentialsResponse(credentials.entrySet().stream().collect(Collectors.toMap(
+            e -> BackupAuthCredentialsResponse.CredentialType.fromLibsignalType(e.getKey()),
+            e -> e.getValue().stream()
+                .map(credential -> new BackupAuthCredentialsResponse.BackupAuthCredential(
+                    credential.credential().serialize(),
+                    credential.redemptionTime().getEpochSecond()))
+                .toList())));
+  }
+
+
+  /**
+   * API annotation for endpoints that take anonymous auth. All anonymous endpoints
+   * <li> 400 if regular auth is used by accident </li>
+   * <li> 401 if the anonymous auth invalid </li>
+   * <li> 403 if the anonymous credential does not have sufficient permissions </li>
+   */
+  @Target(ElementType.METHOD)
+  @Retention(RetentionPolicy.RUNTIME)
+  @ApiResponse(
+      responseCode = "403",
+      description = "Forbidden. The request had insufficient permissions to perform the requested action")
+  @ApiResponse(responseCode = "401", description = """
+      The provided backup auth credential presentation could not be verified or
+      The public key signature was invalid or
+      There is no backup associated with the backup-id in the presentation or
+      The credential was of the wrong type (messages/media)""")
+  @ApiResponse(responseCode = "400", description = "Bad arguments. The request may have been made on an authenticated channel")
+  @interface ApiResponseZkAuth {}
+
+  public record BackupAuthCredentialPresentationHeader(BackupAuthCredentialPresentation presentation) {
+
+    private static final String DESCRIPTION = "Presentation of a ZK backup auth credential acquired from /v1/archives/auth, encoded in standard padded base64";
+
+    public BackupAuthCredentialPresentationHeader(final String header) {
+      this(deserialize(header));
+    }
+
+    private static BackupAuthCredentialPresentation deserialize(final String base64Presentation) {
+      byte[] bytes = Base64.getDecoder().decode(base64Presentation);
+      try {
+        return new BackupAuthCredentialPresentation(bytes);
+      } catch (InvalidInputException e) {
+        throw new IllegalArgumentException(e);
+      }
+    }
+  }
+
+  public record BackupAuthCredentialPresentationSignature(byte[] signature) {
+
+    private static final String DESCRIPTION = "Signature of the ZK auth credential's presentation, encoded in standard padded base64";
+
+    public BackupAuthCredentialPresentationSignature(final String header) {
+      this(Base64.getDecoder().decode(header));
+    }
+  }
+
+  public record ReadAuthResponse(
+      @Schema(description = "Auth headers to include with cdn read requests") Map<String, String> headers) {}
+
+  @GET
+  @Path("/auth/read")
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Get CDN read credentials",
+      description = "Retrieve credentials used to read objects stored on the backup cdn")
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReadAuthResponse.class)))
+  @ApiResponse(responseCode = "400", description = "Bad arguments. The request may have been made on an authenticated channel, or an invalid cdn number was provided")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public ReadAuthResponse readAuth(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @NotNull @Parameter(description = "The number of the CDN to get credentials for") @QueryParam("cdn") final Integer cdn)
+      throws BackupFailedZkAuthenticationException, BackupInvalidArgumentException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    return new ReadAuthResponse(backupManager.generateReadAuth(backupUser, cdn));
+  }
+
+  @GET
+  @Path("/auth/svrb")
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Generate credentials for SVRB",
+      description = """
+          Generate SVRB service credentials. Generated credentials have an expiration time of 1 day (subject to change)
+          """)
+  @ApiResponse(responseCode = "200", description = "`JSON` with generated credentials.", useReturnTypeSchema = true)
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public ExternalServiceCredentials svrbAuth(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature)
+      throws BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    return backupManager.generateSvrbAuth(backupUser);
+  }
+
+  public record BackupInfoResponse(
+      @Schema(description = "The CDN type where the message backup is stored. Media may be stored elsewhere.")
+      int cdn,
+
+      @Schema(description = """
+          The base directory of your backup data on the cdn. The message backup can be found in the returned cdn at
+          /backupDir/backupName and stored media can be found at /backupDir/mediaDir/mediaId
+          """)
+      String backupDir,
+
+      @Schema(description = """
+          The prefix path component for media objects on a cdn. Stored media for mediaId can be found at
+          /backupDir/mediaDir/mediaId.
+          """)
+      String mediaDir,
+
+      @Schema(description = "The name of the most recent message backup on the cdn. The backup is at /backupDir/backupName")
+      String backupName,
+
+      @Schema(description = "The amount of space used to store media")
+      long usedSpace) {}
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Fetch backup info",
+      description = "Retrieve information about the currently stored backup")
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BackupInfoResponse.class)))
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public BackupInfoResponse backupInfo(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature)
+      throws BackupFailedZkAuthenticationException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    final BackupManager.BackupInfo backupInfo = backupManager.backupInfo(backupUser);
+    return new BackupInfoResponse(
+            backupInfo.cdn(),
+            backupInfo.backupSubdir(),
+            backupInfo.mediaSubdir(),
+            backupInfo.messageBackupKey(),
+            backupInfo.mediaUsedSpace().orElse(0L));
+  }
+
+  public record SetPublicKeyRequest(
+      @JsonSerialize(using = ECPublicKeyAdapter.Serializer.class)
+      @JsonDeserialize(using = ECPublicKeyAdapter.Deserializer.class)
+      @NotNull
+      @Schema(type = "string", description = "The public key, serialized in libsignal's elliptic-curve public key format, and encoded in standard padded base64.")
+      ECPublicKey backupIdPublicKey) {}
+
+  @PUT
+  @Path("/keys")
+  @Produces(MediaType.APPLICATION_JSON)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Set public key",
+      description = """
+          Permanently set the public key of an ED25519 key-pair for the backup-id. All requests that provide a anonymous
+          BackupAuthCredentialPresentation (including this one!) must also sign the presentation with the private key
+          corresponding to the provided public key.
+          """)
+  @ApiResponseZkAuth
+  @ApiResponse(responseCode = "204", description = "The public key was set")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ManagedAsync
+  public void setPublicKey(
+      @Auth final Optional<AuthenticatedDevice> account,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @Valid @NotNull SetPublicKeyRequest setPublicKeyRequest)
+      throws BackupFailedZkAuthenticationException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    backupManager.setPublicKey(presentation.presentation, signature.signature, setPublicKeyRequest.backupIdPublicKey);
+  }
+
+
+  public record UploadDescriptorResponse(
+      @Schema(description = "Indicates the CDN type. 3 indicates resumable uploads using TUS")
+      int cdn,
+      @Schema(description = "The location within the specified cdn where the finished upload can be found.")
+      String key,
+      @Schema(description = "A map of headers to include with all upload requests. Potentially contains time-limited upload credentials")
+      Map<String, String> headers,
+      @Schema(description = "The URL to upload to with the appropriate protocol")
+      String signedUploadLocation) {}
+
+  @GET
+  @Path("/upload/form")
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Fetch message backup upload form", description = """
+      Retrieve an upload form that can be used to perform a resumable upload of a message backup.
+
+      Uploads with the returned form will be limited to a maximum size of the provided uploadLength.
+      """)
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UploadDescriptorResponse.class)))
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponse(responseCode = "413", description = "The provided uploadLength is larger than the maximum supported upload size. The maximum upload size is subject to change.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public UploadDescriptorResponse backup(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @Parameter(description = "The size of the message backup to upload in bytes")
+      @QueryParam("uploadLength") final Optional<@Positive Long> uploadLength)
+      throws BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+
+    final boolean oversize = uploadLength
+        .map(length -> length > maxMessageBackupSize)
+        .orElse(false);
+
+    backupMetrics.updateMessageBackupSizeDistribution(backupUser, oversize, uploadLength);
+    if (oversize) {
+      throw new ClientErrorException("exceeded maximum uploadLength", Response.Status.REQUEST_ENTITY_TOO_LARGE);
+    }
+    final BackupUploadDescriptor uploadDescriptor =
+        backupManager.createMessageBackupUploadDescriptor(backupUser, uploadLength.orElse(maxMessageBackupSize));
+    return new UploadDescriptorResponse(
+        uploadDescriptor.cdn(),
+        uploadDescriptor.key(),
+        uploadDescriptor.headers(),
+        uploadDescriptor.signedUploadLocation());
+  }
+
+  @GET
+  @Path("/media/upload/form")
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Fetch media attachment upload form",
+      description = """
+          Retrieve an upload form that can be used to perform a resumable upload of an attachment. After uploading, the
+          attachment can be copied into the backup at PUT /archives/media/.
+
+          Like the account authenticated version at /attachments, the uploaded object is only temporary. Uploads with
+          the returned form will be limited to a maximum size of the provided uploadLength.
+          """)
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UploadDescriptorResponse.class)))
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponse(responseCode = "413", description = "The provided uploadLength is larger than the maximum supported upload size. The maximum upload size is subject to change and is governed by `global.attachments.maxBytes`.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public UploadDescriptorResponse uploadTemporaryAttachment(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @Parameter(description = "The size of the temporary attachment to upload in bytes")
+      @QueryParam("uploadLength") final Optional<@Positive Long> uploadLength)
+      throws RateLimitExceededException, BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+
+    final boolean oversize = uploadLength.map(length -> length > maxAttachmentSize).orElse(false);
+    if (oversize) {
+      throw new ClientErrorException("exceeded maximum uploadLength", Response.Status.REQUEST_ENTITY_TOO_LARGE);
+    }
+
+    final BackupUploadDescriptor uploadDescriptor =
+        backupManager.createTemporaryAttachmentUploadDescriptor(backupUser, uploadLength.orElse(maxAttachmentSize));
+    return new UploadDescriptorResponse(
+        uploadDescriptor.cdn(),
+        uploadDescriptor.key(),
+        uploadDescriptor.headers(),
+        uploadDescriptor.signedUploadLocation());
+  }
+
+  public record CopyMediaRequest(
+      @Schema(description = "The object on the attachment CDN to copy")
+      @NotNull
+      @Valid
+      RemoteAttachment sourceAttachment,
+
+      @Schema(description = "The length of the source attachment before the encryption applied by the copy operation")
+      @NotNull
+      @PositiveOrZero
+      int objectLength,
+
+      @Schema(description = "mediaId to copy on to the backup CDN, encoded in URL-safe padded base64", implementation = String.class)
+      @JsonSerialize(using = ByteArrayBase64UrlAdapter.Serializing.class)
+      @JsonDeserialize(using = ByteArrayBase64UrlAdapter.Deserializing.class)
+      @NotNull
+      @ExactlySize(15)
+      byte[] mediaId,
+
+      @Schema(description = "A 32-byte key for the MAC, encoded in standard padded base64", implementation = String.class)
+      @JsonDeserialize(using = ByteArrayAdapter.Deserializing.class)
+      @NotNull
+      @ExactlySize(32)
+      byte[] hmacKey,
+
+      @Schema(description = "A 32-byte encryption key for AES, encoded in standard padded base64", implementation = String.class)
+      @JsonDeserialize(using = ByteArrayAdapter.Deserializing.class)
+      @NotNull
+      @ExactlySize(32)
+      byte[] encryptionKey) {
+
+    CopyParameters toCopyParameters() {
+      return new CopyParameters(
+          sourceAttachment.cdn(), sourceAttachment.key(),
+          objectLength,
+          new MediaEncryptionParameters(encryptionKey, hmacKey),
+          mediaId);
+    }
+  }
+
+  public record CopyMediaResponse(
+      @Schema(description = "The backup cdn where this media object is stored")
+      @NotNull
+      Integer cdn) {}
+
+  @PUT
+  @Path("/media/")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Backup media",
+      description = """
+          Copy and re-encrypt media from the attachments cdn into the backup cdn.
+
+          The original, already encrypted, attachment will be encrypted with the provided key material before being copied.
+
+          A particular destination media id should not be reused with a different source media id or different encryption
+          parameters.
+          """)
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CopyMediaResponse.class)))
+  @ApiResponse(responseCode = "400", description = "The provided object length was incorrect")
+  @ApiResponse(responseCode = "413", description = "All media capacity has been consumed. Free some space to continue.")
+  @ApiResponse(responseCode = "410", description = "The source object was not found.")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public CopyMediaResponse copyMedia(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @NotNull
+      @Valid final ArchiveController.CopyMediaRequest copyMediaRequest)
+      throws BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException, BackupInvalidArgumentException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    final BackupManager.CopyQuota copyQuota =
+        backupManager.getCopyQuota(backupUser, List.of(copyMediaRequest.toCopyParameters()), maxAttachmentSize);
+    final CopyResult copyResult = backupManager.copyToBackup(copyQuota).next()
+            .blockOptional()
+            .orElseThrow(() -> new IllegalStateException("Non empty copy request must return result"));
+    backupMetrics.updateCopyCounter(copyResult, UserAgentTagUtil.getPlatformTag(userAgent));
+    return switch (copyResult.outcome()) {
+      case SUCCESS -> new CopyMediaResponse(copyResult.cdn());
+      case SOURCE_WRONG_LENGTH -> throw new BadRequestException("Invalid length");
+      case SOURCE_NOT_FOUND -> throw new ClientErrorException("Source object not found", Response.Status.GONE);
+      case OUT_OF_QUOTA ->
+          throw new ClientErrorException("Media quota exhausted", Response.Status.REQUEST_ENTITY_TOO_LARGE);
+    };
+  }
+
+  public record CopyMediaBatchRequest(
+      @Schema(description = "A list of media objects to copy from the attachments CDN to the backup CDN")
+      @NotNull
+      @Size(min = 1, max = 1000)
+      List<@Valid CopyMediaRequest> items) {}
+
+  public record CopyMediaBatchResponse(
+
+      @Schema(description = "Detailed outcome information for each copy request in the batch")
+      List<Entry> responses) {
+
+    public record Entry(
+        @Schema(description = """
+            The outcome of the copy attempt.
+            A 200 indicates the object was successfully copied.
+            A 400 indicates an invalid argument in the request
+            A 410 indicates that the source object was not found
+            A 413 indicates that the media quota was exhausted
+            """)
+        int status,
+
+        @Schema(description = "On a copy failure, a detailed failure reason")
+        String failureReason,
+
+        @Schema(description = "The backup cdn where this media object is stored")
+        Integer cdn,
+
+        @Schema(description = "The mediaId of the object, encoded in URL-safe padded base64", implementation = String.class)
+        @JsonSerialize(using = ByteArrayBase64UrlAdapter.Serializing.class)
+        @JsonDeserialize(using = ByteArrayBase64UrlAdapter.Deserializing.class)
+        @NotNull
+        @ExactlySize(15)
+        byte[] mediaId) {
+
+      static Entry fromCopyResult(final CopyResult copyResult) {
+        return switch (copyResult.outcome()) {
+          case SUCCESS -> new Entry(200, null, copyResult.cdn(), copyResult.mediaId());
+          case SOURCE_WRONG_LENGTH -> new Entry(400, "Invalid source length", null, copyResult.mediaId());
+          case SOURCE_NOT_FOUND -> new Entry(410, "Source not found", null, copyResult.mediaId());
+          case OUT_OF_QUOTA -> new Entry(413, "Media quota exhausted", null, copyResult.mediaId());
+        };
+      }
+    }
+  }
+
+  @PUT
+  @Path("/media/batch")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Batched backup media",
+      description = """
+          Copy and re-encrypt media from the attachments cdn into the backup cdn.
+
+          The original already encrypted attachment will be encrypted with the provided key material before being copied
+
+          If the batch request is processed at all, a 207 will be returned and the outcome of each constituent copy will
+          be provided as a separate entry in the response.
+          """)
+  @ApiResponse(responseCode = "207", description = """
+      The request was processed and each operation's outcome must be inspected individually. This does NOT necessarily
+      indicate the operation was a success.
+      """, content = @Content(schema = @Schema(implementation = CopyMediaBatchResponse.class)))
+  @ApiResponse(responseCode = "413", description = "All media capacity has been consumed. Free some space to continue.")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public Response copyMedia(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final ArchiveController.BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @NotNull
+      @Valid final ArchiveController.CopyMediaBatchRequest copyMediaRequest)
+      throws BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException, BackupInvalidArgumentException {
+
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final Stream<CopyParameters> copyParams = copyMediaRequest.items().stream().map(CopyMediaRequest::toCopyParameters);
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    final BackupManager.CopyQuota copyQuota = backupManager.getCopyQuota(backupUser, copyParams.toList(), maxAttachmentSize);
+    final List<CopyMediaBatchResponse.Entry> copyResults = backupManager.copyToBackup(copyQuota)
+        .doOnNext(result -> backupMetrics.updateCopyCounter(result, UserAgentTagUtil.getPlatformTag(userAgent)))
+        .map(CopyMediaBatchResponse.Entry::fromCopyResult)
+        .collectList().block();
+    return Response.status(207).entity(new CopyMediaBatchResponse(copyResults)).build();
+  }
+
+  @POST
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(
+      summary = "Refresh backup",
+      description = """
+          Indicate that this backup is still active. Clients must periodically upload new backups or perform a refresh
+          via a POST request. If a backup is not refreshed, after 30 days it may be deleted.
+          """)
+  @ApiResponse(responseCode = "204", description = "The backup was successfully refreshed")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public void refresh(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature)
+      throws BackupFailedZkAuthenticationException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    backupManager.ttlRefresh(backupUser);
+  }
+
+  record StoredMediaObject(
+
+      @Schema(description = "The backup cdn where this media object is stored")
+      @NotNull
+      Integer cdn,
+
+      @Schema(description = "The mediaId of the object in URL-safe base64", implementation = String.class)
+      @JsonSerialize(using = ByteArrayBase64UrlAdapter.Serializing.class)
+      @JsonDeserialize(using = ByteArrayBase64UrlAdapter.Deserializing.class)
+      @NotNull
+      @ExactlySize(15)
+      byte[] mediaId,
+
+      @Schema(description = "The length of the object in bytes")
+      @NotNull
+      Long objectLength) {}
+
+  public record ListResponse(
+      @Schema(description = "A page of media objects stored for this backup ID")
+      List<StoredMediaObject> storedMediaObjects,
+
+      @Schema(description = """
+          The base directory of your backup data on the cdn. The stored media can be found at /backupDir/mediaDir/mediaId
+          """)
+      String backupDir,
+
+      @Schema(description = """
+          The prefix path component for the media objects. The stored media for mediaId can be found at /backupDir/mediaDir/mediaId.
+          """)
+      String mediaDir,
+      @Schema(description = "If set, the cursor value to pass to the next list request to continue listing. If absent, all objects have been listed")
+      String cursor) {}
+
+  @GET
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/media")
+  @Operation(summary = "List media objects",
+      description = """
+          Retrieve a list of media objects stored for this backup-id. A client may have previously stored media objects
+          that are no longer referenced in their current backup. To reclaim storage space used by these orphaned
+          objects, perform a list operation and remove any unreferenced media objects via DELETE /v1/backups/<mediaId>.
+          """)
+  @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ListResponse.class)))
+  @ApiResponse(responseCode = "400", description = "Invalid cursor or limit")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public ListResponse listMedia(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @Parameter(description = "A cursor returned by a previous call")
+      @QueryParam("cursor") final Optional<String> cursor,
+
+      @Parameter(description = "The number of entries to return per call")
+      @QueryParam("limit") final Optional<@Min(1) @Max(10_000) Integer> limit)
+      throws BackupPermissionException, BackupFailedZkAuthenticationException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    final BackupManager.ListMediaResult listResult =
+        backupManager.list(backupUser, cursor, limit);
+    return new ListResponse(listResult.media()
+            .stream().map(entry -> new StoredMediaObject(entry.cdn(), entry.key(), entry.length()))
+            .toList(),
+        backupUser.backupDir(),
+        backupUser.mediaDir(),
+        listResult.cursor().orElse(null));
+  }
+
+  public record DeleteMedia(@Size(min = 1, max = 1000) List<@Valid MediaToDelete> mediaToDelete) {
+
+    public record MediaToDelete(
+        @Schema(description = "The backup cdn where this media object is stored")
+        @NotNull
+        Integer cdn,
+
+        @Schema(description = "The mediaId of the object in URL-safe base64", implementation = String.class)
+        @JsonSerialize(using = ByteArrayBase64UrlAdapter.Serializing.class)
+        @JsonDeserialize(using = ByteArrayBase64UrlAdapter.Deserializing.class)
+        @NotNull
+        @ExactlySize(15)
+        byte[] mediaId
+    ) {}
+  }
+
+  @POST
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path("/media/delete")
+  @Operation(summary = "Delete media objects",
+      description = "Delete media objects stored with this backup-id")
+  @ApiResponse(responseCode = "204", description = "The provided objects were successfully deleted or they do not exist")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public void deleteMedia(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature,
+
+      @Valid @NotNull DeleteMedia deleteMedia)
+      throws BackupFailedZkAuthenticationException, BackupWrongCredentialTypeException, BackupPermissionException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+
+    final List<BackupManager.StorageDescriptor> toDelete = deleteMedia.mediaToDelete().stream()
+        .map(media -> new BackupManager.StorageDescriptor(media.cdn(), media.mediaId))
+        .toList();
+
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+    backupManager.deleteMedia(backupUser, toDelete).then().block();
+  }
+
+  @DELETE
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(summary = "Delete entire backup", description = """
+      Delete all backup metadata, objects, and stored public key. To use backups again, a public key must be resupplied.
+      """)
+  @ApiResponse(responseCode = "204", description = "The backup has been successfully removed")
+  @ApiResponse(responseCode = "429", description = "Rate limited.")
+  @ApiResponseZkAuth
+  @ManagedAsync
+  public void deleteBackup(
+      @Auth final Optional<AuthenticatedDevice> account,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+
+      @Parameter(description = BackupAuthCredentialPresentationHeader.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH) final BackupAuthCredentialPresentationHeader presentation,
+
+      @Parameter(description = BackupAuthCredentialPresentationSignature.DESCRIPTION, schema = @Schema(implementation = String.class))
+      @NotNull
+      @HeaderParam(X_SIGNAL_ZK_AUTH_SIGNATURE) final BackupAuthCredentialPresentationSignature signature)
+      throws BackupPermissionException, BackupFailedZkAuthenticationException {
+    if (account.isPresent()) {
+      throw new BadRequestException("must not use authenticated connection for anonymous operations");
+    }
+    final AuthenticatedBackupUser backupUser =
+        backupManager.authenticateBackupUser(presentation.presentation, signature.signature, userAgent);
+
+    backupManager.deleteEntireBackup(backupUser);
+  }
+
+}

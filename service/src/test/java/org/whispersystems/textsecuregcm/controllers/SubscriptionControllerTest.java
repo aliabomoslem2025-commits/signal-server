@@ -1,0 +1,1109 @@
+/*
+ * Copyright 2021 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.controllers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
+import static org.whispersystems.textsecuregcm.util.AttributeValues.b;
+import static org.whispersystems.textsecuregcm.util.AttributeValues.n;
+import static org.whispersystems.textsecuregcm.util.AttributeValues.s;
+
+import io.dropwizard.auth.AuthValueFactoryProvider;
+import io.dropwizard.testing.junit5.DropwizardExtensionsSupport;
+import io.dropwizard.testing.junit5.ResourceExtension;
+import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.core.Response;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+import org.assertj.core.api.InstanceOfAssertFactories;
+import org.glassfish.jersey.server.ServerProperties;
+import org.glassfish.jersey.test.grizzly.GrizzlyWebTestContainerFactory;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.signal.libsignal.zkgroup.InvalidInputException;
+import org.signal.libsignal.zkgroup.ServerSecretParams;
+import org.signal.libsignal.zkgroup.VerificationFailedException;
+import org.signal.libsignal.zkgroup.receipts.ClientZkReceiptOperations;
+import org.signal.libsignal.zkgroup.receipts.ReceiptCredentialRequest;
+import org.signal.libsignal.zkgroup.receipts.ReceiptCredentialResponse;
+import org.signal.libsignal.zkgroup.receipts.ReceiptSerial;
+import org.signal.libsignal.zkgroup.receipts.ServerZkReceiptOperations;
+import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
+import org.whispersystems.textsecuregcm.badges.BadgeTranslator;
+import org.whispersystems.textsecuregcm.configuration.LoginPurchaseConfiguration;
+import org.whispersystems.textsecuregcm.configuration.SubscriptionConfiguration;
+import org.whispersystems.textsecuregcm.controllers.SubscriptionController.GetBankMandateResponse;
+import org.whispersystems.textsecuregcm.controllers.SubscriptionController.GetSubscriptionConfigurationResponse;
+import org.whispersystems.textsecuregcm.entities.Badge;
+import org.whispersystems.textsecuregcm.entities.BadgeSvg;
+import org.whispersystems.textsecuregcm.mappers.CompletionExceptionMapper;
+import org.whispersystems.textsecuregcm.mappers.PurchaseExceptionMapper;
+import org.whispersystems.textsecuregcm.storage.PaymentTime;
+import org.whispersystems.textsecuregcm.storage.SubscriptionManager;
+import org.whispersystems.textsecuregcm.storage.Subscriptions;
+import org.whispersystems.textsecuregcm.storage.WriteConflictException;
+import org.whispersystems.textsecuregcm.purchases.AppleAppStoreManager;
+import org.whispersystems.textsecuregcm.purchases.BankMandateTranslator;
+import org.whispersystems.textsecuregcm.purchases.ChargeFailure;
+import org.whispersystems.textsecuregcm.purchases.CustomerAwareSubscriptionPaymentProcessor;
+import org.whispersystems.textsecuregcm.purchases.GooglePlayBillingManager;
+import org.whispersystems.textsecuregcm.purchases.LevelConfiguration;
+import org.whispersystems.textsecuregcm.purchases.PaymentMethod;
+import org.whispersystems.textsecuregcm.purchases.PaymentProvider;
+import org.whispersystems.textsecuregcm.purchases.ProcessorCustomer;
+import org.whispersystems.textsecuregcm.purchases.ReceiptLevel;
+import org.whispersystems.textsecuregcm.purchases.PurchaseException;
+import org.whispersystems.textsecuregcm.purchases.PurchaseInvalidArgumentsException;
+import org.whispersystems.textsecuregcm.purchases.PurchaseNotFoundException;
+import org.whispersystems.textsecuregcm.purchases.PurchasePaymentRequiredException;
+import org.whispersystems.textsecuregcm.purchases.PurchasePaymentRequiresActionException;
+import org.whispersystems.textsecuregcm.purchases.PurchaseProcessorConflictException;
+import org.whispersystems.textsecuregcm.purchases.PurchaseProcessorException;
+import org.whispersystems.textsecuregcm.purchases.PurchaseReceiptRequestedForOpenPaymentException;
+import org.whispersystems.textsecuregcm.tests.util.AuthHelper;
+import org.whispersystems.textsecuregcm.tests.util.SubscriptionConfigTestHelper;
+import org.whispersystems.textsecuregcm.util.HeaderUtils;
+import org.whispersystems.textsecuregcm.util.MockUtils;
+import org.whispersystems.textsecuregcm.util.SystemMapper;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+
+@ExtendWith(DropwizardExtensionsSupport.class)
+class SubscriptionControllerTest extends AbstractV1SubscriptionControllerTest {
+
+  private static final long MAX_TOTAL_BACKUP_MEDIA_BYTES = 1234L;
+  private static final SubscriptionConfiguration SUBSCRIPTION_CONFIG = SubscriptionConfigTestHelper.getSubscriptionConfig();
+  private static final Subscriptions SUBSCRIPTIONS = mock(Subscriptions.class);
+  private static final GooglePlayBillingManager PLAY_MANAGER = MockUtils.buildMock(GooglePlayBillingManager.class,
+      mgr -> when(mgr.getProvider()).thenReturn(PaymentProvider.GOOGLE_PLAY_BILLING));
+  private static final AppleAppStoreManager APPSTORE_MANAGER = MockUtils.buildMock(AppleAppStoreManager.class,
+      mgr -> when(mgr.getProvider()).thenReturn(PaymentProvider.APPLE_APP_STORE));
+  private static final ServerZkReceiptOperations ZK_OPS = mock(ServerZkReceiptOperations.class);
+  private static final BadgeTranslator BADGE_TRANSLATOR = mock(BadgeTranslator.class);
+  private static final BankMandateTranslator BANK_MANDATE_TRANSLATOR = mock(BankMandateTranslator.class);
+  private static final LoginPurchaseConfiguration LOGIN_PURCHASE_CONFIG =
+      new LoginPurchaseConfiguration("testLoginPlayProductId", "testLoginPlayOptionId", "testLoginAppStoreProductId");
+  private final static SubscriptionController SUBSCRIPTION_CONTROLLER = new SubscriptionController(CLOCK,
+      SUBSCRIPTION_CONFIG, ONETIME_CONFIG, LOGIN_PURCHASE_CONFIG,
+      new SubscriptionManager(SUBSCRIPTIONS, List.of(STRIPE_MANAGER, BRAINTREE_MANAGER, PLAY_MANAGER, APPSTORE_MANAGER),
+          ZK_OPS, ISSUED_RECEIPTS_MANAGER), STRIPE_MANAGER, BRAINTREE_MANAGER, PLAY_MANAGER, APPSTORE_MANAGER,
+      BADGE_TRANSLATOR, BANK_MANDATE_TRANSLATOR, DONATION_PERMITS_MANAGER, MAX_TOTAL_BACKUP_MEDIA_BYTES);
+  private static final ResourceExtension RESOURCE_EXTENSION = ResourceExtension.builder()
+      .addProperty(ServerProperties.UNWRAP_COMPLETION_STAGE_IN_WRITER_ENABLE, Boolean.TRUE)
+      .addProvider(AuthHelper.getAuthFilter())
+      .addProvider(CompletionExceptionMapper.class)
+      .addProvider(new AuthValueFactoryProvider.Binder<>(AuthenticatedDevice.class))
+      .addProvider(PurchaseExceptionMapper.class)
+      .setMapper(SystemMapper.jsonMapper())
+      .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
+      .addResource(SUBSCRIPTION_CONTROLLER)
+      .build();
+
+  @BeforeEach
+  void setUp() {
+    reset(CLOCK, DONATION_PERMITS, SUBSCRIPTIONS, STRIPE_MANAGER, BRAINTREE_MANAGER, ZK_OPS, ISSUED_RECEIPTS_MANAGER, BADGE_TRANSLATOR);
+
+    setUpDonationPermitsSpendStubbing(DONATION_PERMITS);
+
+    when(CLOCK.instant()).thenReturn(Instant.now());
+
+    when(STRIPE_MANAGER.getProvider()).thenReturn(PaymentProvider.STRIPE);
+    when(BRAINTREE_MANAGER.getProvider()).thenReturn(PaymentProvider.BRAINTREE);
+
+    List.of(STRIPE_MANAGER, BRAINTREE_MANAGER)
+        .forEach(manager -> when(manager.supportsPaymentMethod(any()))
+            .thenCallRealMethod());
+    when(STRIPE_MANAGER.getSupportedCurrenciesForPaymentMethod(PaymentMethod.CARD))
+        .thenReturn(Set.of("usd", "jpy", "bif", "eur"));
+    when(STRIPE_MANAGER.getSupportedCurrenciesForPaymentMethod(PaymentMethod.SEPA_DEBIT))
+        .thenReturn(Set.of("eur"));
+    when(STRIPE_MANAGER.getSupportedCurrenciesForPaymentMethod(PaymentMethod.IDEAL))
+        .thenReturn(Set.of("eur"));
+    when(BRAINTREE_MANAGER.getSupportedCurrenciesForPaymentMethod(PaymentMethod.PAYPAL))
+        .thenReturn(Set.of("usd", "jpy"));
+  }
+
+  @Nested
+  class SetSubscriptionLevel {
+
+    private final long levelId = 5L;
+    private final String currency = "jpy";
+
+    private String subscriberId;
+
+    @BeforeEach
+    void setUp() {
+      final byte[] subscriberUserAndKey = new byte[32];
+      Arrays.fill(subscriberUserAndKey, (byte) 1);
+      subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+      final ProcessorCustomer processorCustomer = new ProcessorCustomer("testCustomerId", PaymentProvider.STRIPE);
+
+      final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+          Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+          Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+          Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID, b(processorCustomer.toDynamoBytes())
+      );
+      final Subscriptions.Record record = Subscriptions.Record.from(
+          Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+      when(SUBSCRIPTIONS.get(eq(Arrays.copyOfRange(subscriberUserAndKey, 0, 16)), any()))
+          .thenReturn(Subscriptions.GetResult.found(record));
+    }
+
+    @Test
+    void createSubscriptionSuccess() throws PurchaseException {
+      when(STRIPE_MANAGER.createSubscription(any(), any(), anyLong(), anyLong()))
+          .thenReturn(mock(CustomerAwareSubscriptionPaymentProcessor.SubscriptionId.class));
+
+      final String level = String.valueOf(levelId);
+      final String idempotencyKey = UUID.randomUUID().toString();
+      try (Response response = RESOURCE_EXTENSION.target(
+              String.format("/v1/subscription/%s/level/%s/%s/%s", subscriberId, level, currency, idempotencyKey))
+          .request()
+          .put(Entity.json(""))) {
+
+        assertThat(response.getStatus()).isEqualTo(200);
+      }
+    }
+
+    @Test
+    void createSubscriptionProcessorDeclined() throws PurchaseException {
+      when(STRIPE_MANAGER.createSubscription(any(), any(), anyLong(), anyLong()))
+          .thenThrow(new PurchaseProcessorException(PaymentProvider.STRIPE,
+              new ChargeFailure("card_declined", "Insufficient funds", null, null, null)));
+
+      final String level = String.valueOf(levelId);
+      final String idempotencyKey = UUID.randomUUID().toString();
+      final Map<?, ?> responseMap;
+      try (Response response = RESOURCE_EXTENSION.target(
+              String.format("/v1/subscription/%s/level/%s/%s/%s", subscriberId, level, currency, idempotencyKey))
+          .request()
+          .put(Entity.json(""))) {
+
+        assertThat(response.getStatus()).isEqualTo(PurchaseExceptionMapper.PROCESSOR_ERROR_STATUS_CODE);
+
+        responseMap = response.readEntity(Map.class);
+      }
+      assertThat(responseMap.get("processor")).isEqualTo("STRIPE");
+      assertThat(responseMap.get("chargeFailure")).asInstanceOf(
+              InstanceOfAssertFactories.map(String.class, Object.class))
+          .extracting("code")
+          .isEqualTo("card_declined");
+    }
+
+    @Test
+    void missingCustomerId() {
+      final byte[] subscriberUserAndKey = new byte[32];
+      Arrays.fill(subscriberUserAndKey, (byte) 1);
+      subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+      final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+          Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+          Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+          // missing processor:customer field
+      );
+      final Subscriptions.Record record = Subscriptions.Record.from(
+          Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+      when(SUBSCRIPTIONS.get(eq(Arrays.copyOfRange(subscriberUserAndKey, 0, 16)), any()))
+          .thenReturn(Subscriptions.GetResult.found(record));
+
+      final String level = String.valueOf(levelId);
+      final String idempotencyKey = UUID.randomUUID().toString();
+      try (Response response = RESOURCE_EXTENSION.target(
+              String.format("/v1/subscription/%s/level/%s/%s/%s", subscriberId, level, currency, idempotencyKey))
+          .request()
+          .put(Entity.json(""))) {
+        assertThat(response.getStatus()).isEqualTo(409);
+        assertThat(response.readEntity(Map.class)).containsOnlyKeys("code", "message");
+      }
+    }
+
+    @Test
+    void wrongProcessor() {
+      final byte[] subscriberUserAndKey = new byte[32];
+      Arrays.fill(subscriberUserAndKey, (byte) 1);
+      subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+      final ProcessorCustomer processorCustomer = new ProcessorCustomer("testCustomerId", PaymentProvider.BRAINTREE);
+      final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+          Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+          Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+          Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID, b(processorCustomer.toDynamoBytes())
+      );
+      final Subscriptions.Record record = Subscriptions.Record.from(
+          Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+      when(SUBSCRIPTIONS.get(eq(Arrays.copyOfRange(subscriberUserAndKey, 0, 16)), any()))
+          .thenReturn(Subscriptions.GetResult.found(record));
+
+      try (Response response = RESOURCE_EXTENSION
+          .target(String.format("/v1/subscription/%s/create_payment_method", subscriberId))
+          .request()
+          .header(HeaderUtils.DONATION_PERMIT, getDonationPermitHeader())
+          .post(Entity.json(""))) {
+
+        assertThat(response.getStatus()).isEqualTo(409);
+        assertThat(response.readEntity(Map.class)).containsOnlyKeys("code", "message");
+      }
+    }
+
+    @Test
+    void stripePaymentIntentRequiresAction()
+        throws PurchaseInvalidArgumentsException, PurchaseProcessorException {
+      when(STRIPE_MANAGER.createSubscription(any(), any(), anyLong(), anyLong()))
+          .thenThrow(new PurchasePaymentRequiresActionException());
+
+      final String level = String.valueOf(levelId);
+      final String idempotencyKey = UUID.randomUUID().toString();
+      try (Response response = RESOURCE_EXTENSION.target(
+              String.format("/v1/subscription/%s/level/%s/%s/%s", subscriberId, level, currency, idempotencyKey))
+          .request()
+          .put(Entity.json(""))) {
+
+        assertThat(response.getStatus()).isEqualTo(400);
+
+        assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelErrorResponse.class))
+            .satisfies(errorResponse ->
+                assertThat(errorResponse.errors())
+                    .anySatisfy(error ->
+                        assertThat(error.type())
+                            .isEqualTo(
+                                SubscriptionController.SetSubscriptionLevelErrorResponse.Error.Type.PAYMENT_REQUIRES_ACTION)));
+      }
+    }
+  }
+
+  @Test
+  void createSubscriber() {
+    // basic create
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.NOT_STORED);
+
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any())).thenReturn(record);
+
+    try (Response createResponse = RESOURCE_EXTENSION.target(String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .header(HeaderUtils.DONATION_PERMIT, getDonationPermitHeader())
+        .put(Entity.json(""))) {
+      assertThat(createResponse.getStatus()).isEqualTo(200);
+    }
+
+    // creating should be idempotent
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.found(record));
+
+    try (Response idempotentCreateResponse = RESOURCE_EXTENSION.target(
+            String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .put(Entity.json(""))) {
+      assertThat(idempotentCreateResponse.getStatus()).isEqualTo(200);
+    }
+
+    // when the manager returns `null`, it means there was a password mismatch from the storage layer `create`.
+    // this could happen if there is a race between two concurrent `create` requests for the same user ID
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.NOT_STORED);
+    when(SUBSCRIPTIONS.create(any(), any(), any())).thenReturn(null);
+
+    try (Response managerCreateNullResponse = RESOURCE_EXTENSION.target(
+            String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .header(HeaderUtils.DONATION_PERMIT, getDonationPermitHeader())
+        .put(Entity.json(""))) {
+      assertThat(managerCreateNullResponse.getStatus()).isEqualTo(403);
+    }
+
+    final byte[] subscriberUserAndMismatchedKey = new byte[32];
+    Arrays.fill(subscriberUserAndMismatchedKey, 0, 16, (byte) 1);
+    Arrays.fill(subscriberUserAndMismatchedKey, 16, 32, (byte) 2);
+    final String mismatchedSubscriberId = Base64.getEncoder().encodeToString(subscriberUserAndMismatchedKey);
+
+    // a password mismatch for an existing record
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.PASSWORD_MISMATCH);
+
+    try (Response passwordMismatchResponse = RESOURCE_EXTENSION.target(
+            String.format("/v1/subscription/%s", mismatchedSubscriberId))
+        .request()
+        .put(Entity.json(""))) {
+
+      assertThat(passwordMismatchResponse.getStatus()).isEqualTo(403);
+    }
+
+    // invalid request data is a 404
+    final byte[] malformedUserAndKey = new byte[16];
+    Arrays.fill(malformedUserAndKey, (byte) 1);
+    final String malformedUserId = Base64.getEncoder().encodeToString(malformedUserAndKey);
+
+    try (Response malformedUserAndKeyResponse = RESOURCE_EXTENSION.target(
+            String.format("/v1/subscription/%s", malformedUserId))
+        .request()
+        .put(Entity.json(""))) {
+
+      assertThat(malformedUserAndKeyResponse.getStatus()).isEqualTo(404);
+    }
+  }
+
+  @Test
+  void createPaymentMethod() {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.NOT_STORED);
+
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any(Instant.class))).thenReturn(record);
+
+    try (Response createSubscriberResponse = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .header(HeaderUtils.DONATION_PERMIT, getDonationPermitHeader())
+        .put(Entity.json(""))) {
+
+      assertThat(createSubscriberResponse.getStatus()).isEqualTo(200);
+    }
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    final String customerId = "some-customer-id";
+    final ProcessorCustomer customer = new ProcessorCustomer(
+        customerId, PaymentProvider.STRIPE);
+    when(STRIPE_MANAGER.createCustomer(any(), any()))
+        .thenReturn(customer);
+
+    final Map<String, AttributeValue> dynamoItemWithProcessorCustomer = new HashMap<>(dynamoItem);
+    dynamoItemWithProcessorCustomer.put(Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+        b(new ProcessorCustomer(customerId, PaymentProvider.STRIPE).toDynamoBytes()));
+    final Subscriptions.Record recordWithCustomerId = Subscriptions.Record.from(record.user,
+        dynamoItemWithProcessorCustomer);
+
+    when(SUBSCRIPTIONS.setProcessorAndCustomerId(any(Subscriptions.Record.class), any(), any(Instant.class)))
+        .thenReturn(recordWithCustomerId);
+
+    final String clientSecret = "some-client-secret";
+    when(STRIPE_MANAGER.createPaymentMethodSetupToken(customerId))
+        .thenReturn(clientSecret);
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/create_payment_method", subscriberId))
+        .request()
+        .header(HeaderUtils.DONATION_PERMIT, getDonationPermitHeader())
+        .post(Entity.json(""))) {
+      final SubscriptionController.CreatePaymentMethodResponse createPaymentMethodResponse =
+          response.readEntity(SubscriptionController.CreatePaymentMethodResponse.class);
+
+      assertThat(createPaymentMethodResponse.processor()).isEqualTo(PaymentProvider.STRIPE);
+      assertThat(createPaymentMethodResponse.clientSecret()).isEqualTo(clientSecret);
+    }
+  }
+
+  @Test
+  void updateSubscriberMissingDonationPermit() {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    // Creating a subscriber requires a permit
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.NOT_STORED);
+    try (Response response = RESOURCE_EXTENSION.target(String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .put(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    // Updating a subscriber does not require a permit
+    when(SUBSCRIPTIONS.get(any(), any())).thenReturn(Subscriptions.GetResult.found(
+        Subscriptions.Record.from(Arrays.copyOfRange(subscriberUserAndKey, 0, 16), Map.of(
+            Subscriptions.KEY_PASSWORD, b(new byte[16]),
+            Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+            Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+        ))));
+
+    try (Response response = RESOURCE_EXTENSION.target(String.format("/v1/subscription/%s", subscriberId))
+        .request()
+        .put(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(200);
+    }
+  }
+
+  @Test
+  void createPaymentMethodMissingDonationPermit() {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/create_payment_method", subscriberId))
+        .request()
+        .post(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(401);
+    }
+  }
+
+  @Test
+  void setSubscriptionLevelMissingProcessorCustomer() {
+    // set up record
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any(Instant.class)))
+        .thenReturn(record);
+
+    // set up mocks
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/level/%d/%s/%s", subscriberId, 5, "usd", "abcd"))
+        .request()
+        .put(Entity.json(""))) {
+
+      assertThat(response.getStatus()).isEqualTo(409);
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+      "5, M1",
+      "15, M2",
+      "35, M3",
+      "201, M4",
+  })
+  void setSubscriptionLevel(long levelId, String expectedProcessorId)
+      throws PurchaseProcessorConflictException, PurchaseProcessorException {
+    // set up record
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final String customerId = "customer";
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+        b(new ProcessorCustomer(customerId, PaymentProvider.BRAINTREE).toDynamoBytes())
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any(Instant.class)))
+        .thenReturn(record);
+
+    // set up mocks
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    when(BRAINTREE_MANAGER.createSubscription(any(), any(), anyLong(), anyLong()))
+        .thenReturn(new CustomerAwareSubscriptionPaymentProcessor.SubscriptionId("subscription"));
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/level/%d/%s/%s", subscriberId, levelId, "usd", "abcd"))
+        .request()
+        .put(Entity.json(""))) {
+
+      verify(BRAINTREE_MANAGER).createSubscription(eq(customerId), eq(expectedProcessorId), eq(levelId), eq(0L));
+      verifyNoMoreInteractions(BRAINTREE_MANAGER);
+
+      assertThat(response.getStatus()).isEqualTo(200);
+
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelSuccessResponse.class))
+          .extracting(SubscriptionController.SetSubscriptionLevelSuccessResponse::level)
+          .isEqualTo(levelId);
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource
+  void setSubscriptionLevelExistingSubscription(final String existingCurrency, final long existingLevel,
+      final String requestCurrency, final long requestLevel, final boolean expectUpdate)
+      throws PurchaseProcessorConflictException, PurchaseProcessorException {
+
+    // set up record
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final String customerId = "customer";
+    final String existingSubscriptionId = "existingSubscription";
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+        b(new ProcessorCustomer(customerId, PaymentProvider.BRAINTREE).toDynamoBytes()),
+        Subscriptions.KEY_SUBSCRIPTION_ID, s(existingSubscriptionId)
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any(Instant.class)))
+        .thenReturn(record);
+
+    // set up mocks
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    final Object subscriptionObj = new Object();
+    when(BRAINTREE_MANAGER.getSubscription(any())).thenReturn(subscriptionObj);
+    when(BRAINTREE_MANAGER.getLevelAndCurrencyForSubscription(subscriptionObj))
+        .thenReturn(new CustomerAwareSubscriptionPaymentProcessor.LevelAndCurrency(existingLevel, existingCurrency));
+    final String updatedSubscriptionId = "updatedSubscriptionId";
+
+    if (expectUpdate) {
+      when(BRAINTREE_MANAGER.updateSubscription(any(), any(), anyLong(), anyString()))
+          .thenReturn(new CustomerAwareSubscriptionPaymentProcessor.SubscriptionId(updatedSubscriptionId));
+    }
+
+    final String idempotencyKey = "abcd";
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/level/%d/%s/%s", subscriberId, requestLevel, requestCurrency,
+            idempotencyKey))
+        .request()
+        .put(Entity.json(""))) {
+
+      verify(BRAINTREE_MANAGER).getSubscription(any());
+      verify(BRAINTREE_MANAGER).getLevelAndCurrencyForSubscription(any());
+
+      if (expectUpdate) {
+        verify(BRAINTREE_MANAGER).updateSubscription(any(), any(), eq(requestLevel), eq(idempotencyKey));
+        verify(SUBSCRIPTIONS).subscriptionLevelChanged(any(), any(), eq(requestLevel), eq(updatedSubscriptionId));
+      }
+
+      verifyNoMoreInteractions(BRAINTREE_MANAGER);
+
+      assertThat(response.getStatus()).isEqualTo(200);
+
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelSuccessResponse.class))
+          .extracting(SubscriptionController.SetSubscriptionLevelSuccessResponse::level)
+          .isEqualTo(requestLevel);
+    }
+  }
+
+  static Stream<Arguments> setSubscriptionLevelExistingSubscription() {
+    return Stream.of(
+        Arguments.of("usd", 5, "usd", 5, false),
+        Arguments.of("usd", 5, "jpy", 5, true),
+        Arguments.of("usd", 5, "usd", 15, true),
+        Arguments.of("usd", 5, "jpy", 15, true),
+        Arguments.of("usd", 201, "usd", 201, false),
+        Arguments.of("usd", 201, "jpy", 201, true)
+    );
+  }
+
+  @Test
+  public void changeSubscriptionLevelInvalid() {
+    // set up record
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final String customerId = "customer";
+    final String existingSubscriptionId = "existingSubscription";
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+        b(new ProcessorCustomer(customerId, PaymentProvider.BRAINTREE).toDynamoBytes()),
+        Subscriptions.KEY_SUBSCRIPTION_ID, s(existingSubscriptionId));
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    when(SUBSCRIPTIONS.create(any(), any(), any(Instant.class)))
+        .thenReturn(record);
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    final Object subscriptionObj = new Object();
+    when(BRAINTREE_MANAGER.getSubscription(any())).thenReturn(subscriptionObj);
+    when(BRAINTREE_MANAGER.getLevelAndCurrencyForSubscription(subscriptionObj))
+        .thenReturn(new CustomerAwareSubscriptionPaymentProcessor.LevelAndCurrency(201, "usd"));
+
+    // Try to change from a backup subscription (201) to a donation subscription (5)
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/level/%d/%s/%s", subscriberId, 5, "usd", "abcd"))
+        .request()
+        .put(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(400);
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelErrorResponse.class))
+          .extracting(SubscriptionController.SetSubscriptionLevelErrorResponse::errors)
+          .asInstanceOf(
+              InstanceOfAssertFactories.list(SubscriptionController.SetSubscriptionLevelErrorResponse.Error.class))
+          .hasSize(1).first()
+          .extracting(SubscriptionController.SetSubscriptionLevelErrorResponse.Error::type)
+          .isEqualTo(SubscriptionController.SetSubscriptionLevelErrorResponse.Error.Type.UNSUPPORTED_LEVEL);
+    }
+  }
+
+  @Test
+  public void setAppStoreTransactionId()
+      throws PurchaseInvalidArgumentsException, PurchasePaymentRequiredException, RateLimitExceededException, PurchaseNotFoundException {
+    final String originalTxId = "aTxId";
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final byte[] user = Arrays.copyOfRange(subscriberUserAndKey, 0, 16);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final Instant now = Instant.now();
+    when(CLOCK.instant()).thenReturn(now);
+
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()));
+
+    final Subscriptions.Record record = Subscriptions.Record.from(user, dynamoItem);
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    when(APPSTORE_MANAGER.validateTransaction(eq(originalTxId)))
+        .thenReturn(99L);
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/appstore/%s", subscriberId, originalTxId))
+        .request()
+        .post(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(200);
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelSuccessResponse.class).level())
+          .isEqualTo(99L);
+    }
+
+    verify(SUBSCRIPTIONS, times(1)).setIapPurchase(
+        any(),
+        eq(new ProcessorCustomer(originalTxId, PaymentProvider.APPLE_APP_STORE)),
+        eq(originalTxId),
+        eq(99L),
+        eq(now));
+  }
+
+
+  @Test
+  public void setPlayPurchaseToken() throws RateLimitExceededException, PurchaseException {
+    final String purchaseToken = "aPurchaseToken";
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final byte[] user = Arrays.copyOfRange(subscriberUserAndKey, 0, 16);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final Instant now = Instant.now();
+    when(CLOCK.instant()).thenReturn(now);
+
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond())
+    );
+    final Subscriptions.Record record = Subscriptions.Record.from(user, dynamoItem);
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    final GooglePlayBillingManager.ValidatedToken validatedToken = mock(GooglePlayBillingManager.ValidatedToken.class);
+    when(validatedToken.getLevel()).thenReturn(99L);
+    when(PLAY_MANAGER.validateToken(eq(purchaseToken))).thenReturn(validatedToken);
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/playbilling/%s", subscriberId, purchaseToken))
+        .request()
+        .post(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(200);
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelSuccessResponse.class).level())
+          .isEqualTo(99L);
+    }
+
+    verify(SUBSCRIPTIONS, times(1)).setIapPurchase(
+        any(),
+        eq(new ProcessorCustomer(purchaseToken, PaymentProvider.GOOGLE_PLAY_BILLING)),
+        eq(purchaseToken),
+        eq(99L),
+        eq(now));
+  }
+
+  @Test
+  public void replacePlayPurchaseToken() throws RateLimitExceededException, PurchaseException {
+    final String oldPurchaseToken = "oldPurchaseToken";
+    final String newPurchaseToken = "newPurchaseToken";
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final byte[] user = Arrays.copyOfRange(subscriberUserAndKey, 0, 16);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final Instant now = Instant.now();
+    when(CLOCK.instant()).thenReturn(now);
+
+    final ProcessorCustomer oldPc = new ProcessorCustomer(oldPurchaseToken, PaymentProvider.GOOGLE_PLAY_BILLING);
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID, b(oldPc.toDynamoBytes()));
+    final Subscriptions.Record record = Subscriptions.Record.from(user, dynamoItem);
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+
+    final GooglePlayBillingManager.ValidatedToken validatedToken = mock(GooglePlayBillingManager.ValidatedToken.class);
+    when(validatedToken.getLevel()).thenReturn(99L);
+
+    when(PLAY_MANAGER.validateToken(eq(newPurchaseToken))).thenReturn(validatedToken);
+
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/playbilling/%s", subscriberId, newPurchaseToken))
+        .request()
+        .post(Entity.json(""))) {
+      assertThat(response.getStatus()).isEqualTo(200);
+      assertThat(response.readEntity(SubscriptionController.SetSubscriptionLevelSuccessResponse.class).level())
+          .isEqualTo(99L);
+    }
+
+    verify(SUBSCRIPTIONS, times(1)).setIapPurchase(
+        any(),
+        eq(new ProcessorCustomer(newPurchaseToken, PaymentProvider.GOOGLE_PLAY_BILLING)),
+        eq(newPurchaseToken),
+        eq(99L),
+        eq(now));
+
+    verify(PLAY_MANAGER, times(1)).cancelAllActiveSubscriptions(oldPurchaseToken);
+  }
+
+  @Test
+  void createReceiptChargeFailure()
+      throws InvalidInputException, VerificationFailedException, PurchaseException {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(Subscriptions.Record.from(
+            Arrays.copyOfRange(subscriberUserAndKey, 0, 16),
+            Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+                Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+                Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+                Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+                b(new ProcessorCustomer("customer", PaymentProvider.STRIPE).toDynamoBytes()),
+                Subscriptions.KEY_SUBSCRIPTION_ID, s("subscriptionId")))));
+    when(STRIPE_MANAGER.getReceiptItem(any()))
+        .thenThrow(new PurchasePaymentRequiredException(
+            PaymentProvider.STRIPE,
+            new ChargeFailure("card_declined", "Insufficient funds", null, null, null)));
+
+    final ReceiptCredentialRequest receiptRequest = new ClientZkReceiptOperations(
+        ServerSecretParams.generate().getPublicParams()).createReceiptCredentialRequestContext(
+        new ReceiptSerial(new byte[ReceiptSerial.SIZE])).getRequest();
+    final Map<?, ?> responseMap;
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/receipt_credentials", subscriberId))
+        .request()
+        .post(Entity.json(new SubscriptionController.GetReceiptCredentialRequest(receiptRequest.serialize())))) {
+
+      assertThat(response.getStatus()).isEqualTo(402);
+      responseMap = response.readEntity(Map.class);
+    }
+    assertThat(responseMap.get("processor")).isEqualTo("STRIPE");
+    assertThat(responseMap.get("chargeFailure")).asInstanceOf(
+            InstanceOfAssertFactories.map(String.class, Object.class))
+        .extracting("code")
+        .isEqualTo("card_declined");
+  }
+
+  @Test
+  void createReceiptCredentialAlreadyRedeemed()
+      throws InvalidInputException, VerificationFailedException, PurchaseException, WriteConflictException {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(Subscriptions.Record.from(
+            Arrays.copyOfRange(subscriberUserAndKey, 0, 16),
+            Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+                Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+                Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+                Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+                b(new ProcessorCustomer("customer", PaymentProvider.STRIPE).toDynamoBytes()),
+                Subscriptions.KEY_SUBSCRIPTION_ID, s("subscriptionId")))));
+    when(STRIPE_MANAGER.getReceiptItem(any()))
+        .thenReturn(new CustomerAwareSubscriptionPaymentProcessor.ReceiptItem(
+            "itemId",
+            PaymentTime.periodStart(Instant.ofEpochSecond(10).plus(Duration.ofDays(1))),
+            5L));
+    doThrow(WriteConflictException.class).when(ISSUED_RECEIPTS_MANAGER).recordIssuance(any(), any(), any(), any());
+
+    final ReceiptCredentialRequest receiptRequest = new ClientZkReceiptOperations(
+        ServerSecretParams.generate().getPublicParams()).createReceiptCredentialRequestContext(
+        new ReceiptSerial(new byte[ReceiptSerial.SIZE])).getRequest();
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/receipt_credentials", subscriberId))
+        .request()
+        .post(Entity.json(new SubscriptionController.GetReceiptCredentialRequest(receiptRequest.serialize())))) {
+
+      assertThat(response.getStatus()).isEqualTo(409);
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"5, P45D", "201, P13D"})
+  public void createReceiptCredential(long level, Duration expectedExpirationWindow)
+      throws InvalidInputException, VerificationFailedException, PurchasePaymentRequiredException, PurchaseReceiptRequestedForOpenPaymentException {
+    final byte[] subscriberUserAndKey = new byte[32];
+    Arrays.fill(subscriberUserAndKey, (byte) 1);
+    final String subscriberId = Base64.getEncoder().encodeToString(subscriberUserAndKey);
+
+    final String customerId = "customer";
+    final String subscriptionId = "subscriptionId";
+    final Map<String, AttributeValue> dynamoItem = Map.of(Subscriptions.KEY_PASSWORD, b(new byte[16]),
+        Subscriptions.KEY_CREATED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_ACCESSED_AT, n(Instant.now().getEpochSecond()),
+        Subscriptions.KEY_PROCESSOR_ID_CUSTOMER_ID,
+        b(new ProcessorCustomer(customerId, PaymentProvider.BRAINTREE).toDynamoBytes()),
+        Subscriptions.KEY_SUBSCRIPTION_ID, s(subscriptionId));
+    final Subscriptions.Record record = Subscriptions.Record.from(
+        Arrays.copyOfRange(subscriberUserAndKey, 0, 16), dynamoItem);
+    final ReceiptCredentialRequest receiptRequest = new ClientZkReceiptOperations(
+        ServerSecretParams.generate().getPublicParams()).createReceiptCredentialRequestContext(
+        new ReceiptSerial(new byte[ReceiptSerial.SIZE])).getRequest();
+    final ReceiptCredentialResponse receiptCredentialResponse = mock(ReceiptCredentialResponse.class);
+
+    when(SUBSCRIPTIONS.get(any(), any()))
+        .thenReturn(Subscriptions.GetResult.found(record));
+    when(BRAINTREE_MANAGER.getReceiptItem(subscriptionId)).thenReturn(
+        new CustomerAwareSubscriptionPaymentProcessor.ReceiptItem(
+            "itemId",
+            PaymentTime.periodStart(Instant.ofEpochSecond(10).plus(Duration.ofDays(1))),
+            level));
+    when(ZK_OPS.issueReceiptCredential(any(), anyLong(), eq(level))).thenReturn(receiptCredentialResponse);
+    when(receiptCredentialResponse.serialize()).thenReturn(new byte[0]);
+    try (Response response = RESOURCE_EXTENSION
+        .target(String.format("/v1/subscription/%s/receipt_credentials", subscriberId))
+        .request()
+        .post(Entity.json(new SubscriptionController.GetReceiptCredentialRequest(receiptRequest.serialize())))) {
+      assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    long expectedExpiration = Instant.EPOCH
+        // Truncated current time is day 1
+        .plus(Duration.ofDays(1))
+        // Expected expiration window
+        .plus(expectedExpirationWindow)
+        // + one day to forgive skew
+        .plus(Duration.ofDays(1)).getEpochSecond();
+    verify(ZK_OPS).issueReceiptCredential(any(), eq(expectedExpiration), eq(level));
+  }
+
+  @Test
+  void testGetBankMandate() {
+    when(BANK_MANDATE_TRANSLATOR.translate(any(), any())).thenReturn("bankMandate");
+    final Response response = RESOURCE_EXTENSION.target("/v1/subscription/bank_mandate/sepa_debit")
+        .request()
+        .get();
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.readEntity(GetBankMandateResponse.class).mandate()).isEqualTo("bankMandate");
+  }
+
+  @Test
+  void testGetBankMandateInvalidBankTransferType() {
+    final Response response = RESOURCE_EXTENSION.target("/v1/subscription/bank_mandate/ach")
+        .request()
+        .get();
+    assertThat(response.getStatus()).isEqualTo(400);
+  }
+
+  @Test
+  void getSubscriptionConfiguration() {
+    when(BADGE_TRANSLATOR.translate(any(), eq("B1"))).thenReturn(new Badge("B1", "cat1", "name1", "desc1",
+        List.of("l", "m", "h", "x", "xx", "xxx"), "SVG",
+        List.of(new BadgeSvg("sl", "sd"), new BadgeSvg("ml", "md"), new BadgeSvg("ll", "ld"))));
+    when(BADGE_TRANSLATOR.translate(any(), eq("B2"))).thenReturn(new Badge("B2", "cat2", "name2", "desc2",
+        List.of("l", "m", "h", "x", "xx", "xxx"), "SVG",
+        List.of(new BadgeSvg("sl", "sd"), new BadgeSvg("ml", "md"), new BadgeSvg("ll", "ld"))));
+    when(BADGE_TRANSLATOR.translate(any(), eq("B3"))).thenReturn(new Badge("B3", "cat3", "name3", "desc3",
+        List.of("l", "m", "h", "x", "xx", "xxx"), "SVG",
+        List.of(new BadgeSvg("sl", "sd"), new BadgeSvg("ml", "md"), new BadgeSvg("ll", "ld"))));
+    when(BADGE_TRANSLATOR.translate(any(), eq("BOOST"))).thenReturn(new Badge("BOOST", "boost1", "boost1", "boost1",
+        List.of("l", "m", "h", "x", "xx", "xxx"), "SVG",
+        List.of(new BadgeSvg("sl", "sd"), new BadgeSvg("ml", "md"), new BadgeSvg("ll", "ld"))));
+    when(BADGE_TRANSLATOR.translate(any(), eq("GIFT"))).thenReturn(new Badge("GIFT", "gift1", "gift1", "gift1",
+        List.of("l", "m", "h", "x", "xx", "xxx"), "SVG",
+        List.of(new BadgeSvg("sl", "sd"), new BadgeSvg("ml", "md"), new BadgeSvg("ll", "ld"))));
+
+    GetSubscriptionConfigurationResponse response = RESOURCE_EXTENSION.target("/v1/subscription/configuration")
+        .request()
+        .get(GetSubscriptionConfigurationResponse.class);
+
+    assertThat(response.sepaMaximumEuros()).isEqualTo("10000");
+    assertThat(response.currencies()).containsKeys("usd", "jpy", "bif", "eur").satisfies(currencyMap -> {
+      assertThat(currencyMap).extractingByKey("usd").satisfies(currency -> {
+        assertThat(currency.minimum()).isEqualByComparingTo(
+            BigDecimal.valueOf(2.5).setScale(2, RoundingMode.HALF_EVEN));
+        assertThat(currency.oneTime()).isEqualTo(
+            Map.of(1L,
+                List.of(BigDecimal.valueOf(5.5).setScale(2, RoundingMode.HALF_EVEN), BigDecimal.valueOf(6),
+                    BigDecimal.valueOf(7), BigDecimal.valueOf(8),
+                    BigDecimal.valueOf(9), BigDecimal.valueOf(10)), 100L,
+                List.of(BigDecimal.valueOf(20))));
+        assertThat(currency.subscription()).isEqualTo(
+            Map.of(5L, BigDecimal.valueOf(5), 15L, BigDecimal.valueOf(15), 35L, BigDecimal.valueOf(35)));
+        assertThat(currency.backupSubscription()).isEqualTo(Map.of(201L, BigDecimal.valueOf(5)));
+        assertThat(currency.supportedPaymentMethods()).isEqualTo(List.of(PaymentMethod.CARD, PaymentMethod.PAYPAL));
+      });
+
+      assertThat(currencyMap).extractingByKey("jpy").satisfies(currency -> {
+        assertThat(currency.minimum()).isEqualByComparingTo(
+            BigDecimal.valueOf(250));
+        assertThat(currency.oneTime()).isEqualTo(
+            Map.of(1L,
+                List.of(BigDecimal.valueOf(550), BigDecimal.valueOf(600),
+                    BigDecimal.valueOf(700), BigDecimal.valueOf(800),
+                    BigDecimal.valueOf(900), BigDecimal.valueOf(1000)), 100L,
+                List.of(BigDecimal.valueOf(2000))));
+        assertThat(currency.subscription()).isEqualTo(
+            Map.of(5L, BigDecimal.valueOf(500), 15L, BigDecimal.valueOf(1500), 35L, BigDecimal.valueOf(3500)));
+        assertThat(currency.backupSubscription()).isEqualTo(Map.of(201L, BigDecimal.valueOf(500)));
+        assertThat(currency.supportedPaymentMethods()).isEqualTo(List.of(PaymentMethod.CARD, PaymentMethod.PAYPAL));
+      });
+
+      assertThat(currencyMap).extractingByKey("bif").satisfies(currency -> {
+        assertThat(currency.minimum()).isEqualByComparingTo(
+            BigDecimal.valueOf(2500));
+        assertThat(currency.oneTime()).isEqualTo(
+            Map.of(1L,
+                List.of(BigDecimal.valueOf(5500), BigDecimal.valueOf(6000),
+                    BigDecimal.valueOf(7000), BigDecimal.valueOf(8000),
+                    BigDecimal.valueOf(9000), BigDecimal.valueOf(10000)), 100L,
+                List.of(BigDecimal.valueOf(20000))));
+        assertThat(currency.subscription()).isEqualTo(
+            Map.of(5L, BigDecimal.valueOf(5000), 15L, BigDecimal.valueOf(15000), 35L, BigDecimal.valueOf(35000)));
+        assertThat(currency.backupSubscription()).isEqualTo(Map.of(201L, BigDecimal.valueOf(5000)));
+        assertThat(currency.supportedPaymentMethods()).isEqualTo(List.of(PaymentMethod.CARD));
+      });
+
+      assertThat(currencyMap).extractingByKey("eur").satisfies(currency -> {
+        assertThat(currency.minimum()).isEqualByComparingTo(
+            BigDecimal.valueOf(3));
+        assertThat(currency.oneTime()).isEqualTo(
+            Map.of(1L,
+                List.of(BigDecimal.valueOf(5), BigDecimal.valueOf(10),
+                    BigDecimal.valueOf(20), BigDecimal.valueOf(30), BigDecimal.valueOf(50), BigDecimal.valueOf(100)), 100L,
+                List.of(BigDecimal.valueOf(5))));
+        assertThat(currency.subscription()).isEqualTo(
+            Map.of(5L, BigDecimal.valueOf(5), 15L, BigDecimal.valueOf(15), 35L, BigDecimal.valueOf(35)));
+        assertThat(currency.backupSubscription()).isEqualTo(Map.of(201L, BigDecimal.valueOf(5)));
+        final List<PaymentMethod> expectedPaymentMethods = List.of(PaymentMethod.CARD, PaymentMethod.SEPA_DEBIT, PaymentMethod.IDEAL);
+        assertThat(currency.supportedPaymentMethods()).isEqualTo(expectedPaymentMethods);
+      });
+    });
+
+    assertThat(response.levels()).containsKeys(1L, 5L, 15L, 35L, 100L).satisfies(levelsMap -> {
+      assertThat(levelsMap).extractingByKey(1L).satisfies(
+          level -> assertThat(level).extracting(LevelConfiguration::badge)
+              .satisfies(badge -> {
+                assertThat(badge.getId()).isEqualTo("BOOST");
+                assertThat(badge.getName()).isEqualTo("boost1");
+              }));
+
+      assertThat(levelsMap).extractingByKey(100L).satisfies(
+          level -> assertThat(level).extracting(LevelConfiguration::badge)
+              .satisfies(badge -> {
+                assertThat(badge.getId()).isEqualTo("GIFT");
+                assertThat(badge.getName()).isEqualTo("gift1");
+              }));
+
+      assertThat(levelsMap).extractingByKey(5L).satisfies(level ->
+          assertThat(level).extracting(LevelConfiguration::badge)
+              .satisfies(badge -> {
+                assertThat(badge.getId()).isEqualTo("B1");
+                assertThat(badge.getName()).isEqualTo("name1");
+              }));
+
+      assertThat(levelsMap).extractingByKey(15L).satisfies(level ->
+          assertThat(level).extracting(LevelConfiguration::badge)
+              .satisfies(badge -> {
+                assertThat(badge.getId()).isEqualTo("B2");
+                assertThat(badge.getName()).isEqualTo("name2");
+              }));
+
+      assertThat(levelsMap).extractingByKey(35L).satisfies(level ->
+          assertThat(level).extracting(LevelConfiguration::badge)
+              .satisfies(badge -> {
+                assertThat(badge.getId()).isEqualTo("B3");
+                assertThat(badge.getName()).isEqualTo("name3");
+              }));
+    });
+
+    assertThat(response.backup().levels()).containsOnlyKeys("201").extractingByKey("201").satisfies(configuration -> {
+      assertThat(configuration.storageAllowanceBytes()).isEqualTo(MAX_TOTAL_BACKUP_MEDIA_BYTES);
+      assertThat(configuration.playProductId()).isEqualTo("testPlayProductId");
+      assertThat(configuration.mediaTtlDays()).isEqualTo(40);
+    });
+    assertThat(response.backup().freeTierMediaDays()).isEqualTo(30);
+
+    assertThat(response.login().level()).isEqualTo(ReceiptLevel.LOGIN.getValue());
+    assertThat(response.login().playProductId()).isEqualTo(LOGIN_PURCHASE_CONFIG.playProductId());
+    assertThat(response.login().playOptionId()).isEqualTo(LOGIN_PURCHASE_CONFIG.playOptionId());
+    assertThat(response.login().appStoreProductId()).isEqualTo(LOGIN_PURCHASE_CONFIG.appStoreProductId());
+
+    // check the badge vs purchasable badge fields
+    // subscription levels are Badge, while one-time levels are PurchasableBadge, which adds `duration`
+    Map<String, Object> genericResponse = RESOURCE_EXTENSION.target("/v1/subscription/configuration")
+        .request()
+        .get(Map.class);
+
+    assertThat(genericResponse.get("levels")).satisfies(levels -> {
+      final Set<String> oneTimeLevels = Set.of("1", "100");
+      oneTimeLevels.forEach(
+          oneTimeLevel -> assertThat((Map<String, Map<String, Map<String, Object>>>) levels)
+              .extractingByKey(oneTimeLevel)
+              .satisfies(level -> assertThat(level.get("badge")).containsKeys("duration")));
+
+      ((Map<String, ?>) levels).keySet().stream()
+          .filter(Predicate.not(oneTimeLevels::contains))
+          .forEach(subscriptionLevel ->
+              assertThat((Map<String, Map<String, Map<String, Object>>>) levels)
+                  .extractingByKey(subscriptionLevel)
+                  .satisfies(level -> assertThat(level.get("badge")).doesNotContainKeys("duration")));
+    });
+  }
+
+
+
+}

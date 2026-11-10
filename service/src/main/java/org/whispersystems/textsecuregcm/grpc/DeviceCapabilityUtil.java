@@ -1,0 +1,40 @@
+/*
+ * Copyright 2024 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.grpc;
+
+import org.whispersystems.textsecuregcm.storage.DeviceCapability;
+
+public class DeviceCapabilityUtil {
+
+  private DeviceCapabilityUtil() {
+  }
+
+  public static DeviceCapability fromGrpcDeviceCapability(final org.signal.chat.common.DeviceCapability grpcDeviceCapability) {
+    return switch (grpcDeviceCapability) {
+      case DEVICE_CAPABILITY_STORAGE -> DeviceCapability.STORAGE;
+      case DEVICE_CAPABILITY_TRANSFER -> DeviceCapability.TRANSFER;
+      case DEVICE_CAPABILITY_ATTACHMENT_BACKFILL -> DeviceCapability.ATTACHMENT_BACKFILL;
+      case DEVICE_CAPABILITY_SPARSE_POST_QUANTUM_RATCHET -> DeviceCapability.SPARSE_POST_QUANTUM_RATCHET;
+      case DEVICE_CAPABILITY_PROFILES_V2 -> DeviceCapability.PROFILES_V2;
+      case DEVICE_CAPABILITY_USERNAME_CHANGE_SYNC_MESSAGE ->  DeviceCapability.USERNAME_CHANGE_SYNC_MESSAGE;
+      case DEVICE_CAPABILITY_OPTIONAL_PHONE_NUMBER -> DeviceCapability.OPTIONAL_PHONE_NUMBER;
+      case DEVICE_CAPABILITY_UNSPECIFIED, UNRECOGNIZED ->
+          throw GrpcExceptions.invalidArguments("unrecognized device capability");
+    };
+  }
+
+  public static org.signal.chat.common.DeviceCapability toGrpcDeviceCapability(final DeviceCapability deviceCapability) {
+    return switch (deviceCapability) {
+      case STORAGE -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_STORAGE;
+      case TRANSFER -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_TRANSFER;
+      case ATTACHMENT_BACKFILL -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_ATTACHMENT_BACKFILL;
+      case SPARSE_POST_QUANTUM_RATCHET -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_SPARSE_POST_QUANTUM_RATCHET;
+      case PROFILES_V2 -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_PROFILES_V2;
+      case USERNAME_CHANGE_SYNC_MESSAGE -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_USERNAME_CHANGE_SYNC_MESSAGE;
+      case OPTIONAL_PHONE_NUMBER -> org.signal.chat.common.DeviceCapability.DEVICE_CAPABILITY_OPTIONAL_PHONE_NUMBER;
+    };
+  }
+}

@@ -1,0 +1,559 @@
+/*
+ * Copyright 2023 Signal Messenger, LLC
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+package org.whispersystems.textsecuregcm.controllers;
+
+import static org.whispersystems.textsecuregcm.metrics.MetricsUtil.name;
+
+import com.google.common.net.HttpHeaders;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.HeaderParam;
+import jakarta.ws.rs.NotAuthorizedException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.UUID;
+import javax.annotation.Nullable;
+import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.glassfish.jersey.server.ManagedAsync;
+import org.signal.libsignal.zkgroup.InvalidInputException;
+import org.signal.libsignal.zkgroup.VerificationFailedException;
+import org.signal.libsignal.zkgroup.receipts.ReceiptCredentialPresentation;
+import org.signal.libsignal.zkgroup.receipts.ServerZkReceiptOperations;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.whispersystems.textsecuregcm.auth.BasicAuthorizationHeader;
+import org.whispersystems.textsecuregcm.auth.InvalidRegistrationSessionException;
+import org.whispersystems.textsecuregcm.auth.MfaFailureException;
+import org.whispersystems.textsecuregcm.auth.PhoneVerificationTokenManager;
+import org.whispersystems.textsecuregcm.auth.RecoveryPasswordVerificationFailedException;
+import org.whispersystems.textsecuregcm.auth.RegistrationLockFailureException;
+import org.whispersystems.textsecuregcm.auth.RegistrationLockVerificationManager;
+import org.whispersystems.textsecuregcm.auth.UnverifiedRegistrationSessionException;
+import org.whispersystems.textsecuregcm.configuration.dynamic.DynamicConfiguration;
+import org.whispersystems.textsecuregcm.entities.AccountCreationResponse;
+import org.whispersystems.textsecuregcm.entities.AccountIdentityResponse;
+import org.whispersystems.textsecuregcm.entities.PhoneVerificationRequest;
+import org.whispersystems.textsecuregcm.entities.RegistrationLockFailure;
+import org.whispersystems.textsecuregcm.entities.RegistrationRequest;
+import org.whispersystems.textsecuregcm.filters.RemoteAddressFilter;
+import org.whispersystems.textsecuregcm.limits.RateLimiters;
+import org.whispersystems.textsecuregcm.mappers.MfaFailureExceptionMapper;
+import org.whispersystems.textsecuregcm.metrics.UserAgentTagUtil;
+import org.whispersystems.textsecuregcm.spam.RegistrationFraudChecker;
+import org.whispersystems.textsecuregcm.storage.Account;
+import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.AnnotatedTotpKey;
+import org.whispersystems.textsecuregcm.storage.AnnotatedWebAuthnCredential;
+import org.whispersystems.textsecuregcm.storage.DeviceCapability;
+import org.whispersystems.textsecuregcm.storage.DeviceIdentityInfo;
+import org.whispersystems.textsecuregcm.storage.DeviceSpec;
+import org.whispersystems.textsecuregcm.storage.DynamicConfigurationManager;
+import org.whispersystems.textsecuregcm.storage.PhoneNumberRecoveryPasswordsManager;
+import org.whispersystems.textsecuregcm.storage.ReceiptAlreadyRedeemedException;
+import org.whispersystems.textsecuregcm.purchases.ReceiptCredentialPresentationFactory;
+import org.whispersystems.textsecuregcm.purchases.ReceiptLevel;
+import org.whispersystems.textsecuregcm.util.HeaderUtils;
+import org.whispersystems.textsecuregcm.util.Util;
+
+@Path("/v1/registration")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Registration")
+public class RegistrationController {
+
+  private static final DistributionSummary REREGISTRATION_IDLE_DAYS_DISTRIBUTION = DistributionSummary
+      .builder(name(RegistrationController.class, "reregistrationIdleDays"))
+      .distributionStatisticExpiry(Duration.ofHours(2))
+      .register(Metrics.globalRegistry);
+
+  private static final String ACCOUNT_CREATED_COUNTER_NAME = name(RegistrationController.class, "accountCreated");
+  private static final String COUNTRY_CODE_TAG_NAME = "countryCode";
+  private static final String REGION_CODE_TAG_NAME = "regionCode";
+  private static final String VERIFICATION_TYPE_TAG_NAME = "verification";
+  private static final String FICTITIOUS_NUMBER_TAG_NAME = "fictitiousNumber";
+
+  private final AccountsManager accounts;
+  private final PhoneVerificationTokenManager phoneVerificationTokenManager;
+  private final RegistrationLockVerificationManager registrationLockVerificationManager;
+  private final RateLimiters rateLimiters;
+  private final RegistrationFraudChecker registrationFraudChecker;
+  private final ReceiptCredentialPresentationFactory receiptCredentialPresentationFactory;
+  private final ServerZkReceiptOperations serverZkReceiptOperations;
+  private final Clock clock;
+  private final DynamicConfigurationManager<DynamicConfiguration> dynamicConfigurationManager;
+
+  private static final Logger logger = LoggerFactory.getLogger(RegistrationController.class);
+
+  public RegistrationController(final AccountsManager accounts,
+                                final PhoneVerificationTokenManager phoneVerificationTokenManager,
+                                final RegistrationLockVerificationManager registrationLockVerificationManager,
+                                final RateLimiters rateLimiters,
+                                final RegistrationFraudChecker registrationFraudChecker,
+                                final ReceiptCredentialPresentationFactory receiptCredentialPresentationFactory,
+                                final ServerZkReceiptOperations serverZkReceiptOperations,
+                                final Clock clock,
+                                final DynamicConfigurationManager<DynamicConfiguration> dynamicConfigurationManager) {
+
+    this.accounts = accounts;
+    this.phoneVerificationTokenManager = phoneVerificationTokenManager;
+    this.registrationLockVerificationManager = registrationLockVerificationManager;
+    this.rateLimiters = rateLimiters;
+    this.registrationFraudChecker = registrationFraudChecker;
+    this.receiptCredentialPresentationFactory = receiptCredentialPresentationFactory;
+    this.serverZkReceiptOperations = serverZkReceiptOperations;
+    this.clock = clock;
+    this.dynamicConfigurationManager = dynamicConfigurationManager;
+  }
+
+  @POST
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @Operation(summary = "Registers an account",
+  description = """
+      Registers a new account or attempts to “re-register” an existing account. It is expected that a well-behaved client
+      could make up to three consecutive calls to this API:
+      1. gets 423 from existing registration lock \n
+      2. gets 409 from device available for transfer \n
+      3. success \n
+      """)
+  @ApiResponse(responseCode = "200", description = "Account creation succeeded", useReturnTypeSchema = true)
+  @ApiResponse(responseCode = "400", description = "Invalid session ID or receipt credential presentation")
+  @ApiResponse(responseCode = "401", description = "The session identified in the request is not verified, or the receipt credential presented fails verification, is expired, or is already redeemed")
+  @ApiResponse(responseCode = "403", description = "Verification failed for the provided Registration Recovery Password")
+  @ApiResponse(responseCode = "409", description = "The caller has not explicitly elected to skip transferring data from another device, but a device transfer is technically possible")
+  @ApiResponse(responseCode = "422", description = "The request did not pass validation")
+  @ApiResponse(responseCode = "423", content = @Content(schema = @Schema(implementation = RegistrationLockFailure.class)))
+  @ApiResponse(responseCode = "429", description = "Too many attempts", headers = @Header(
+      name = "Retry-After",
+      description = "If present, an positive integer indicating the number of seconds before a subsequent attempt could succeed"))
+  @ApiResponse(responseCode = "441",
+      description = """
+          Second factor authentication failed. Either the account has one or more factors configured, and the request’s
+          factor was incorrect or absent, or the account has no factors, but the request included a factor.
+          """,
+      content = @Content(schema = @Schema(implementation = MfaFailureExceptionMapper.MfaFailureResponse.class)))
+  @ApiResponse(responseCode = "499", description = "Client must support post-quantum ratchet")
+  @ManagedAsync
+  public AccountCreationResponse register(
+      @Parameter(
+          in = ParameterIn.HEADER,
+          name = HttpHeaders.AUTHORIZATION,
+          description = """
+            The basic auth header. For accounts with a phone number, the username must be the e164-formatted number that
+            is being registered. For accounts without a phone number, the username is ignored on a fresh registration
+            (it must be present, however, so any string that can't be parsed as an e164-formatted phone number or UUID
+            is acceptable; "__no_number__" is recommended). For account recovery (re-registration) by ACI, it must be
+            set to the ACI of the account being recovered. In all cases, the password is the password to be used for
+            primary device authentication.
+            """,
+          required = true,
+          schema = @Schema(type = "string")
+      )
+      @HeaderParam(HttpHeaders.AUTHORIZATION) @NotNull final BasicAuthorizationHeader authorizationHeader,
+      @HeaderParam(HeaderUtils.X_SIGNAL_AGENT) final String signalAgent,
+      @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
+      @NotNull @Valid final RegistrationRequest registrationRequest,
+      @Context final ContainerRequestContext requestContext)
+      throws RateLimitExceededException, InterruptedException, RegistrationLockFailureException, MfaFailureException {
+
+    if (!registrationRequest.isEverySignedKeyValid(userAgent)) {
+      throw new WebApplicationException("Invalid signature", 422);
+    }
+
+    if (!(registrationRequest.accountAttributes().getCapabilities() != null
+        ? registrationRequest.accountAttributes().getCapabilities()
+        : Collections.<DeviceCapability>emptySet()).containsAll(DeviceCapability.CAPABILITIES_REQUIRED_FOR_NEW_DEVICES)) {
+
+      throw new WebApplicationException("Missing required device capability", 499);
+    }
+
+    final AccountCreationResponse response;
+
+    if (registrationRequest.receiptCredentialPresentation() != null && registrationRequest.receiptCredentialPresentation().length > 0) {
+      // A receipt credential presentation will only be present if the caller is trying to register a new account
+      // without a phone number, in which case we can (and must) ignore the "username" in the authentication header.
+      response = registerAccountWithoutNumber(authorizationHeader.getPassword(), registrationRequest, userAgent, signalAgent);
+    } else {
+      // The caller is either trying to register a new account with a phone number or recover an account by ACI. Either
+      // way, the "username" from the auth header is meaningful.
+      @Nullable UUID recoveredAccountIdentifier;
+
+      try {
+        recoveredAccountIdentifier = UUID.fromString(authorizationHeader.getUsername());
+      } catch (final IllegalArgumentException _) {
+        // The provided username is either a phone number or a nonsense string (for registration without a phone number)
+        recoveredAccountIdentifier = null;
+      }
+
+      if (recoveredAccountIdentifier != null) {
+        response = recoverAccount(recoveredAccountIdentifier, authorizationHeader.getPassword(), registrationRequest, userAgent, signalAgent);
+      } else {
+        response = registerAccountWithNumber(authorizationHeader.getUsername(), authorizationHeader.getPassword(), registrationRequest, requestContext, userAgent, signalAgent);
+      }
+    }
+
+    return response;
+  }
+
+  private AccountCreationResponse registerAccountWithNumber(
+      final String number,
+      final String password,
+      final RegistrationRequest registrationRequest,
+      final ContainerRequestContext requestContext,
+      final String userAgent,
+      final String signalAgent)
+      throws RateLimitExceededException, InterruptedException, RegistrationLockFailureException, MfaFailureException {
+
+    if (registrationRequest.pniIdentityKey() == null) {
+      // RegistrationRequest checks that either all phone number-associated information is present or all is absent
+      throw new WebApplicationException("PNI keys and registration ID must be provided", 422);
+    }
+
+    final PhoneVerificationRequest.VerificationType verificationType;
+    try {
+      verificationType = phoneVerificationTokenManager.verify(
+          number,
+          requestContext.getHeaderString(HttpHeaders.USER_AGENT),
+          requestContext.getHeaderString(HttpHeaders.ACCEPT_LANGUAGE),
+          (String) requestContext.getProperty(RemoteAddressFilter.REMOTE_ADDRESS_ATTRIBUTE_NAME),
+          StringUtils.isNotBlank(registrationRequest.sessionId()) ? registrationRequest.decodeSessionId() : null,
+          registrationRequest.recoveryPassword());
+    } catch (final UnverifiedRegistrationSessionException e) {
+      throw new NotAuthorizedException("registration session is unverified");
+    } catch (final InvalidRegistrationSessionException e) {
+      throw new BadRequestException(e.getMessage());
+    } catch (final IOException e) {
+      throw new ServiceUnavailableException(e.getMessage());
+    } catch (final RecoveryPasswordVerificationFailedException e) {
+      throw new ForbiddenException("recovery password could not be verified");
+    }
+
+    rateLimiters.getRegistrationLimiter().validate(number);
+
+    // There can be at most one existing account for a set of numbers in the same equivalence class, so it's sufficient
+    // to find the first one.
+    Optional<Account> existingAccount = Util.getAlternateForms(number)
+        .stream()
+        .map(accounts::getByE164)
+        .filter(Optional::isPresent)
+        .map(Optional::get)
+        .findFirst();
+
+    existingAccount.ifPresent(account -> {
+      final Instant accountLastSeen = Instant.ofEpochMilli(account.getLastSeen());
+      final Duration timeSinceLastSeen = Duration.between(accountLastSeen, Instant.now());
+      REREGISTRATION_IDLE_DAYS_DISTRIBUTION.record(timeSinceLastSeen.toDays());
+    });
+
+    if (!registrationRequest.skipDeviceTransfer() && existingAccount.map(account -> account.hasCapability(DeviceCapability.TRANSFER)).orElse(false)) {
+      // If a device transfer is possible, clients must explicitly opt out of a transfer (i.e. after prompting the user)
+      // before we'll let them create a new account "from scratch"
+      throw new WebApplicationException(Response.status(409, "device transfer available").build());
+    }
+
+    if (existingAccount.isPresent()) {
+      assert existingAccount.get().getNumber().isPresent();
+      registrationLockVerificationManager.verifyRegistrationLock(existingAccount.get(),
+          registrationRequest.accountAttributes().getRegistrationLock(),
+          userAgent, RegistrationLockVerificationManager.Flow.REGISTRATION, verificationType);
+
+      existingAccount = Optional.of(checkMfa(existingAccount.get(), registrationRequest.webAuthnResponse(), registrationRequest.totp()));
+    }
+
+    final Account account = accounts.create(number,
+        registrationRequest.accountAttributes(),
+        registrationRequest.aciIdentityKey(),
+        registrationRequest.pniIdentityKey(),
+        new DeviceSpec(
+            registrationRequest.accountAttributes().getName(),
+            password,
+            signalAgent,
+            registrationRequest.accountAttributes().getCapabilities(),
+            new DeviceIdentityInfo(
+                registrationRequest.accountAttributes().getRegistrationId(),
+                registrationRequest.deviceActivationRequest().aciSignedPreKey(),
+                registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
+            Optional.of(new DeviceIdentityInfo(
+                registrationRequest.accountAttributes().getPhoneNumberIdentityRegistrationId().get(),
+                // We've already validated the presence of PNI keys by this point
+                registrationRequest.deviceActivationRequest().pniSignedPreKey().get(),
+                registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().get())),
+            registrationRequest.accountAttributes().getFetchesMessages(),
+            registrationRequest.deviceActivationRequest().apnToken(),
+            registrationRequest.deviceActivationRequest().gcmToken()),
+        userAgent);
+
+    if (verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
+      try {
+        registrationFraudChecker.handleVerificationCompleted(registrationRequest.sessionId(), account);
+      } catch (final Exception e) {
+        logger.warn("Failed to notify fraud checker of completed verification session", e);
+      }
+    }
+
+    Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
+            Tag.of(COUNTRY_CODE_TAG_NAME, Util.getCountryCode(number)),
+            Tag.of(REGION_CODE_TAG_NAME, Util.getRegion(number)),
+            Tag.of(VERIFICATION_TYPE_TAG_NAME, verificationType.name()),
+            Tag.of(FICTITIOUS_NUMBER_TAG_NAME, String.valueOf(Util.isFictitiousNumber(number)))))
+        .increment();
+
+    final AccountIdentityResponse identityResponse = new AccountIdentityResponseBuilder(account)
+        // If there was an existing account, return whether it could have had something in the storage service
+        .storageCapable(existingAccount
+            .map(a -> a.hasCapability(DeviceCapability.STORAGE))
+            .orElse(false))
+        .build();
+
+    return new AccountCreationResponse(identityResponse, existingAccount.isPresent());
+  }
+
+  private AccountCreationResponse registerAccountWithoutNumber(
+      final String password,
+      final RegistrationRequest registrationRequest,
+      final String userAgent,
+      final String signalAgent) {
+
+    if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
+      throw new BadRequestException("login purchases are not enabled");
+    }
+
+    registrationRequest.accountAttributes().recoveryPassword()
+        .filter(ArrayUtils::isNotEmpty)
+        .orElseThrow(() -> new WebApplicationException("Account recovery password is required", 422));
+
+    final ReceiptCredentialPresentation receiptCredentialPresentation;
+    try {
+      receiptCredentialPresentation = receiptCredentialPresentationFactory
+          .build(registrationRequest.receiptCredentialPresentation());
+    } catch (InvalidInputException _) {
+      throw new BadRequestException("Invalid receipt credential presentation");
+    }
+    try {
+      serverZkReceiptOperations.verifyReceiptCredentialPresentation(receiptCredentialPresentation);
+    } catch (VerificationFailedException _) {
+      throw new NotAuthorizedException("Receipt credential presentation verification failed");
+    }
+
+    final Instant receiptExpiration = Instant.ofEpochSecond(receiptCredentialPresentation.getReceiptExpirationTime());
+    if (clock.instant().isAfter(receiptExpiration)) {
+      throw new NotAuthorizedException("Receipt is already expired");
+    }
+
+    final long receiptLevel = receiptCredentialPresentation.getReceiptLevel();
+    if (receiptLevel != ReceiptLevel.LOGIN.getValue() && receiptLevel != ReceiptLevel.LOGIN_SANDBOX.getValue()) {
+      throw new BadRequestException("Invalid receipt level");
+    }
+
+    try {
+      final Account account = accounts.create(
+          registrationRequest.accountAttributes(),
+          registrationRequest.aciIdentityKey(),
+          receiptCredentialPresentation,
+          new DeviceSpec(
+              registrationRequest.accountAttributes().getName(),
+              password,
+              signalAgent,
+              registrationRequest.accountAttributes().getCapabilities(),
+              new DeviceIdentityInfo(registrationRequest.accountAttributes().getRegistrationId(), registrationRequest.deviceActivationRequest()
+                  .aciSignedPreKey(), registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
+              Optional.empty(),
+              registrationRequest.accountAttributes().getFetchesMessages(),
+              registrationRequest.deviceActivationRequest().apnToken(),
+              registrationRequest.deviceActivationRequest().gcmToken()),
+          userAgent);
+
+      Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
+              Tag.of(VERIFICATION_TYPE_TAG_NAME, registrationRequest.verificationType().name())))
+          .increment();
+
+      final AccountIdentityResponse accountIdentityResponse = new AccountIdentityResponseBuilder(account).build();
+      return new AccountCreationResponse(accountIdentityResponse, false);
+    } catch (ReceiptAlreadyRedeemedException _) {
+      throw new NotAuthorizedException("Receipt already redeemed");
+    }
+  }
+
+  private AccountCreationResponse recoverAccount(final UUID accountIdentifier,
+      final String password,
+      final RegistrationRequest registrationRequest,
+      final String userAgent,
+      final String signalAgent) throws RegistrationLockFailureException, RateLimitExceededException, MfaFailureException {
+
+    if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
+      throw new BadRequestException("login purchases are not enabled");
+    }
+
+    if (ArrayUtils.isEmpty(registrationRequest.recoveryPassword())) {
+      throw new BadRequestException("Recovery password required for authentication when recovering an account by identifier");
+    }
+
+    if (registrationRequest.accountAttributes().recoveryPassword().isEmpty()) {
+      throw new BadRequestException("Recovery password required for for storage when recovering an account by identifier");
+    }
+
+    if (registrationRequest.pniIdentityKey() == null) {
+      throw new BadRequestException("Must specify a PNI-associated identity key when recovering an account by identifier");
+    }
+
+    Account existingAccount = accounts.getByAccountIdentifier(accountIdentifier)
+            .orElseThrow(ForbiddenException::new);
+
+    final boolean passwordVerified = existingAccount.getAccountRecoveryPassword()
+        .map(saltedRecoveryPasswordHash -> PhoneNumberRecoveryPasswordsManager.verify(saltedRecoveryPasswordHash, registrationRequest.recoveryPassword()))
+        .orElse(false);
+
+    if (!passwordVerified) {
+      throw new ForbiddenException();
+    }
+
+    if (!registrationRequest.skipDeviceTransfer() && existingAccount.hasCapability(DeviceCapability.TRANSFER)) {
+      // If a device transfer is possible, clients must explicitly opt out of a transfer (i.e. after prompting the user)
+      // before we'll let them recover an account and start "from scratch"
+      throw new WebApplicationException(Response.status(409, "device transfer available").build());
+    }
+
+    existingAccount = checkMfa(existingAccount, registrationRequest.webAuthnResponse(), registrationRequest.totp());
+
+    final Account reclaimedAccount = existingAccount.getNumber().isPresent()
+        ? recoverAccountWithPhoneNumber(existingAccount, registrationRequest, password, userAgent, signalAgent)
+        : recoverAccountWithoutPhoneNumber(existingAccount, registrationRequest, password, userAgent, signalAgent);
+
+    Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
+            Tag.of(VERIFICATION_TYPE_TAG_NAME, registrationRequest.verificationType().name())))
+        .increment();
+
+    return new AccountCreationResponse(new AccountIdentityResponseBuilder(reclaimedAccount)
+        .storageCapable(existingAccount.hasCapability(DeviceCapability.STORAGE))
+        .build(), true);
+  }
+
+  private Account recoverAccountWithoutPhoneNumber(final Account existingAccount,
+      final RegistrationRequest registrationRequest,
+      final String password,
+      final String userAgent,
+      final String signalAgent) {
+
+    return accounts.recover(existingAccount,
+        registrationRequest.accountAttributes(),
+        registrationRequest.aciIdentityKey(),
+        Optional.empty(),
+        new DeviceSpec(
+            registrationRequest.accountAttributes().getName(),
+            password,
+            signalAgent,
+            registrationRequest.accountAttributes().getCapabilities(),
+            new DeviceIdentityInfo(
+                registrationRequest.accountAttributes().getRegistrationId(),
+                registrationRequest.deviceActivationRequest().aciSignedPreKey(),
+                registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
+            Optional.empty(),
+            registrationRequest.accountAttributes().getFetchesMessages(),
+            registrationRequest.deviceActivationRequest().apnToken(),
+            registrationRequest.deviceActivationRequest().gcmToken()),
+        userAgent);
+  }
+
+  private Account recoverAccountWithPhoneNumber(final Account existingAccount,
+      final RegistrationRequest registrationRequest,
+      final String password,
+      final String userAgent,
+      final String signalAgent) throws RegistrationLockFailureException, RateLimitExceededException {
+
+    registrationLockVerificationManager.verifyRegistrationLock(existingAccount,
+        registrationRequest.accountAttributes().getRegistrationLock(),
+        userAgent,
+        RegistrationLockVerificationManager.Flow.REGISTRATION,
+        PhoneVerificationRequest.VerificationType.RECOVERY_PASSWORD);
+
+    assert registrationRequest.pniIdentityKey() != null;
+
+    return accounts.recover(existingAccount,
+        registrationRequest.accountAttributes(),
+        registrationRequest.aciIdentityKey(),
+        Optional.of(registrationRequest.pniIdentityKey()),
+        new DeviceSpec(
+            registrationRequest.accountAttributes().getName(),
+            password,
+            signalAgent,
+            registrationRequest.accountAttributes().getCapabilities(),
+            new DeviceIdentityInfo(
+                registrationRequest.accountAttributes().getRegistrationId(),
+                registrationRequest.deviceActivationRequest().aciSignedPreKey(),
+                registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
+            Optional.of(new DeviceIdentityInfo(
+                registrationRequest.accountAttributes().getPhoneNumberIdentityRegistrationId().get(),
+                // We've already validated the presence of PNI keys by this point
+                registrationRequest.deviceActivationRequest().pniSignedPreKey().orElseThrow(),
+                registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().orElseThrow())),
+            registrationRequest.accountAttributes().getFetchesMessages(),
+            registrationRequest.deviceActivationRequest().apnToken(),
+            registrationRequest.deviceActivationRequest().gcmToken()),
+        userAgent);
+  }
+
+  /// @return the maybe-updated [Account] reference. Callers must use it to avoid stale reads and updates.
+  private Account checkMfa(final Account account, @Nullable final String webAuthn, @Nullable final Integer totp) throws RateLimitExceededException, MfaFailureException {
+
+    final boolean hasTotp = account.getMfaKeys().values().stream().anyMatch(k -> k instanceof AnnotatedTotpKey);
+    final boolean hasWebAuthn = account.getMfaKeys().values().stream().anyMatch(k -> k instanceof AnnotatedWebAuthnCredential);
+
+    if (!hasTotp && !hasWebAuthn) {
+      if (totp != null || webAuthn != null) {
+        throw new MfaFailureException(null, false);
+      }
+      return account;
+    }
+
+    if (totp != null || webAuthn != null) {
+      rateLimiters.getCheckMfaLimiter().validate(account.getAccountIdentifier());
+    }
+
+    final Optional<Account> updatedAccount;
+    if (hasWebAuthn && webAuthn != null) {
+      updatedAccount = accounts.verifyWebAuthnAuthentication(account, webAuthn);
+    } else {
+      updatedAccount = Optional.empty();
+    }
+
+    final boolean webAuthnVerified = updatedAccount.isPresent();
+
+    final boolean totpVerified = hasTotp && totp != null
+        && accounts.verifyTotp(account, clock.instant(), totp);
+
+    if (webAuthnVerified || totpVerified) {
+      return updatedAccount.orElse(account);
+    }
+
+    throw new MfaFailureException(accounts.startWebAuthnAuthentication(account).orElse(null), hasTotp);
+  }
+}
