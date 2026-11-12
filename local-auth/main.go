@@ -214,6 +214,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/v1/local-auth/challenge", s.handleChallenge)
 	mux.HandleFunc("/v1/local-auth/verify", s.handleVerify)
 	mux.HandleFunc("/v1/local-auth/complete", s.handleComplete)
+	mux.HandleFunc("/v1/local-auth/internal/validate-ticket", s.requireBearer(s.cfg.internalToken, s.handleValidateTicket))
 	mux.HandleFunc("/v1/local-auth/internal/consume-ticket", s.requireBearer(s.cfg.internalToken, s.handleConsumeTicket))
 	mux.HandleFunc("/v1/local-auth/admin/users", s.requireBearer(s.cfg.adminToken, s.handleUsers))
 	mux.HandleFunc("/v1/local-auth/admin/users/", s.requireBearer(s.cfg.adminToken, s.handleUserSubresource))
@@ -667,6 +668,38 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 		"registrationTicket": ticket,
 		"expiresAt": ticketExpiry,
 		"sessionId": base64.StdEncoding.EncodeToString([]byte("LAN1." + ticket)),
+	})
+}
+
+func (s *server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var request struct { Ticket string `json:"ticket"` }
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	claims, err := s.verifyTicket(request.Ticket)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "registration ticket is invalid or expired")
+		return
+	}
+	var phone string
+	var idHash []byte
+	var expires time.Time
+	var consumed sql.NullTime
+	err = s.db.QueryRowContext(r.Context(), `
+		SELECT phone, android_id_hash, expires_at, consumed_at
+		FROM local_auth_tickets WHERE jti = $1`, claims.JTI).
+		Scan(&phone, &idHash, &expires, &consumed)
+	if err != nil || consumed.Valid || time.Now().UTC().After(expires) ||
+		phone != claims.Phone || hex.EncodeToString(idHash) != claims.AndroidIDHash {
+		writeError(w, http.StatusUnauthorized, "registration ticket has already been used or expired")
+		return
+	}
+	writeJSON(w, http.StatusOK, consumeTicketResponse{
+		Phone: phone, AndroidIDHash: hex.EncodeToString(idHash), ExpiresAt: expires,
 	})
 }
 
