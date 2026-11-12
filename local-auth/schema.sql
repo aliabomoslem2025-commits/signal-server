@@ -40,5 +40,10 @@ CREATE TABLE IF NOT EXISTS local_auth_tickets (
   consumed_at TIMESTAMPTZ
 );
 
+-- Idempotent column upgrades for installations created by an earlier sidecar version.
+ALTER TABLE local_auth_challenges ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE local_auth_challenges ADD COLUMN IF NOT EXISTS code_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE local_auth_devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS local_auth_challenges_expiry ON local_auth_challenges(expires_at);
 CREATE INDEX IF NOT EXISTS local_auth_tickets_expiry ON local_auth_tickets(expires_at);
