@@ -91,8 +91,6 @@ import org.whispersystems.textsecuregcm.asn.AsnInfoProviderImpl;
 import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
-import org.whispersystems.textsecuregcm.auth.LocalDeviceAuthManager;
-import org.whispersystems.textsecuregcm.controllers.LocalDeviceAuthController;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.CertificateGenerator;
 import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
@@ -241,6 +239,8 @@ import org.whispersystems.textsecuregcm.metrics.MicrometerAwsSdkMetricPublisher;
 import org.whispersystems.textsecuregcm.metrics.ReportedMessageMetricsListener;
 import org.whispersystems.textsecuregcm.metrics.TlsCertificateExpirationUtil;
 import org.whispersystems.textsecuregcm.metrics.TrafficSource;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthController;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.providers.MultiRecipientMessageProvider;
 import org.whispersystems.textsecuregcm.push.APNSender;
 import org.whispersystems.textsecuregcm.push.FcmSender;
@@ -1130,13 +1130,15 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             config.getDeliveryCertificate().expiresDays(),
             config.getDeliveryCertificate().embedSigner());
 
-    final LocalDeviceAuthManager localDeviceAuthManager = config.getLocalDeviceAuthConfiguration().isEnabled()
-        ? new LocalDeviceAuthManager(dynamoDbClient, config.getLocalDeviceAuthConfiguration(), clock)
-        : null;
+    final String localAuthTableName = System.getenv("LOCAL_AUTH_TABLE") == null
+        || System.getenv("LOCAL_AUTH_TABLE").isBlank()
+        ? LocalDeviceAuthStore.DEFAULT_TABLE_NAME
+        : System.getenv("LOCAL_AUTH_TABLE");
+    final LocalDeviceAuthStore localDeviceAuthStore = new LocalDeviceAuthStore(dynamoDbClient, localAuthTableName);
 
     final PhoneVerificationTokenManager phoneVerificationTokenManager = new PhoneVerificationTokenManager(
-        phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager,
-        registrationRecoveryChecker, localDeviceAuthManager);
+        phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager, registrationRecoveryChecker,
+        localDeviceAuthStore);
 
     final ChangeNumberManager changeNumberManager = new ChangeNumberManager(messageSender, accountsManager,
         phoneVerificationTokenManager, registrationLockVerificationManager, rateLimiters,
@@ -1288,6 +1290,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.jersey().register(new AuthDynamicFeature(accountAuthFilter));
     environment.jersey().register(new AuthValueFactoryProvider.Binder<>(AuthenticatedDevice.class));
     environment.jersey().register(new TimestampResponseFilter());
+    environment.jersey().register(new LocalDeviceAuthController(localDeviceAuthStore));
 
     ///
     WebSocketEnvironment<AuthenticatedDevice> webSocketEnvironment = new WebSocketEnvironment<>(environment,
@@ -1359,10 +1362,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             donationPermitsManager),
         new LoginPurchaseController(loginPurchaseManager, dynamicConfigurationManager)
     );
-
-    if (localDeviceAuthManager != null) {
-      commonControllers.add(new LocalDeviceAuthController(localDeviceAuthManager, config.getLocalDeviceAuthConfiguration()));
-    }
 
     for (Object controller : commonControllers) {
       environment.jersey().register(controller);
