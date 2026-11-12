@@ -10,6 +10,7 @@ import io.grpc.StatusRuntimeException;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +36,7 @@ public class PhoneVerificationTokenManager {
   private final RegistrationServiceClient registrationServiceClient;
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
+  private final Optional<LocalAuthTicketClient> localAuthTicketClient;
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
       final RegistrationServiceClient registrationServiceClient,
@@ -44,6 +46,7 @@ public class PhoneVerificationTokenManager {
     this.registrationServiceClient = registrationServiceClient;
     this.phoneNumberRecoveryPasswordsManager = phoneNumberRecoveryPasswordsManager;
     this.registrationRecoveryChecker = registrationRecoveryChecker;
+    this.localAuthTicketClient = LocalAuthTicketClient.fromEnvironment();
   }
 
   /**
@@ -81,7 +84,15 @@ public class PhoneVerificationTokenManager {
         : PhoneVerificationRequest.VerificationType.RECOVERY_PASSWORD;
 
     switch (verificationType) {
-      case SESSION -> verifyBySessionId(number, sessionId);
+      case SESSION -> {
+        if (LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
+          final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
+              () -> new InvalidRegistrationSessionException("LAN authentication is not enabled on this server"));
+          client.validate(number, sessionId);
+        } else {
+          verifyBySessionId(number, sessionId);
+        }
+      }
       case RECOVERY_PASSWORD -> verifyByRecoveryPassword(number, userAgent, acceptLanguage, mostRecentProxy, recoveryPassword);
     }
 
@@ -109,6 +120,24 @@ public class PhoneVerificationTokenManager {
       logger.error("Registration service failure", e);
       throw new IOException("Registration service failure", e);
     }
+  }
+
+  public boolean isLocalAuthSession(final byte[] sessionId) {
+    return LocalAuthTicketClient.isLocalAuthSession(sessionId);
+  }
+
+  /**
+   * Consume the LAN ticket only after Account creation succeeds. Validation happens before registration-lock checks,
+   * so a user can still complete an existing Signal registration-lock flow without burning the ticket prematurely.
+   */
+  public void consumeLocalAuthSession(final String number, final byte[] sessionId)
+      throws InterruptedException, InvalidRegistrationSessionException, IOException {
+    if (!LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
+      return;
+    }
+    final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
+        () -> new InvalidRegistrationSessionException("LAN authentication is not enabled on this server"));
+    client.consume(number, sessionId);
   }
 
   private void verifyByRecoveryPassword(
