@@ -569,7 +569,7 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonceEncoded := base64.RawURLEncoding.EncodeToString(nonce)
-	message := []byte("signal-local-auth-v1\n" + request.ChallengeID + "\n" + phone + "\n"\n" + nonceEncoded)
+	message := []byte("signal-local-auth-v1\n" + request.ChallengeID + "\n" + phone + "\n" + nonceEncoded)
 	// The Android client signs this canonical message using the device's non-exportable Keystore private key.
 	digest := sha256.Sum256(message)
 	if !ecdsa.VerifyASN1(publicKey, digest[:], signature) {
