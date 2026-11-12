@@ -53,7 +53,7 @@ public final class LocalDeviceAuthController {
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   @Operation(summary = "Start local device authentication using an administrator-enrolled phone/device pair")
-  public LocalDeviceAuthSession createSession(@NotBlank @Valid final CreateSessionRequest request) {
+  public LocalDeviceAuthSession createSession(@Valid final CreateSessionRequest request) {
     try {
       return manager.createSession(request.number(), request.androidId());
     } catch (final LocalDeviceAuthManager.LocalDeviceNotEnrolledException e) {
@@ -69,7 +69,7 @@ public final class LocalDeviceAuthController {
   @Operation(summary = "Consume the one-time local authentication value")
   public LocalDeviceAuthSession verifyCode(
       @jakarta.ws.rs.PathParam("sessionId") final String sessionId,
-      @NotBlank @Valid final VerifyCodeRequest request) {
+      @Valid final VerifyCodeRequest request) {
     try {
       return manager.verifyCode(sessionId, request.code());
     } catch (final LocalDeviceAuthManager.LocalDeviceCodeInvalidException e) {
@@ -88,7 +88,7 @@ public final class LocalDeviceAuthController {
   @Operation(summary = "Create or update an administrator-provisioned phone/device enrollment")
   public Response enroll(
       @HeaderParam(ADMIN_HEADER) final String adminToken,
-      @NotBlank @Valid final EnrollmentRequest request) {
+      @Valid final EnrollmentRequest request) {
     requireAdministrator(adminToken);
     manager.enroll(request.number(), request.androidId(), request.enabled());
     return Response.noContent().build();
@@ -127,14 +127,14 @@ public final class LocalDeviceAuthController {
   }
 
   public record CreateSessionRequest(
-      @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("number") String number,
-      @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("androidId") String androidId) {}
+      @NotBlank @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("number") String number,
+      @NotBlank @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("androidId") String androidId) {}
 
   public record VerifyCodeRequest(
-      @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("code") String code) {}
+      @NotBlank @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("code") String code) {}
 
   public record EnrollmentRequest(
-      @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("number") String number,
-      @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("androidId") String androidId,
+      @NotBlank @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("number") String number,
+      @NotBlank @Schema(requiredMode = Schema.RequiredMode.REQUIRED) @JsonProperty("androidId") String androidId,
       @JsonProperty("enabled") boolean enabled) {}
 }
