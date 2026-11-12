@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS local_auth_challenges (
   phone TEXT NOT NULL,
   android_id_hash BYTEA NOT NULL,
   nonce BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   verified_at TIMESTAMPTZ,
