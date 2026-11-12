@@ -63,6 +63,7 @@ import org.apache.http.HttpStatus;
 import org.glassfish.jersey.server.ManagedAsync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.whispersystems.textsecuregcm.auth.LocalAuthTicketClient;
 import org.whispersystems.textsecuregcm.captcha.AssessmentResult;
 import org.whispersystems.textsecuregcm.captcha.InvalidCaptchaArgumentException;
 import org.whispersystems.textsecuregcm.captcha.RegistrationCaptchaManager;
@@ -113,6 +114,16 @@ public class VerificationController {
   private static final Duration REGISTRATION_RPC_TIMEOUT = Duration.ofSeconds(15);
 
   private static final SecureRandom RANDOM = new SecureRandom();
+
+  private static void rejectLegacySmsVerificationInLocalMode() {
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      throw new WebApplicationException(
+          Response.status(Response.Status.GONE)
+              .entity("SMS and phone-call verification are disabled in LAN-only mode.")
+              .type(MediaType.TEXT_PLAIN)
+              .build());
+    }
+  }
 
   private static final String PUSH_CHALLENGE_COUNTER_NAME = name(VerificationController.class, "pushChallenge");
   private static final String CHALLENGE_PRESENT_TAG_NAME = "present";
@@ -189,6 +200,8 @@ public class VerificationController {
   public VerificationSessionResponse createSession(@NotNull @Valid final CreateVerificationSessionRequest request,
       @Context final ContainerRequestContext requestContext)
       throws RateLimitExceededException, ObsoletePhoneNumberFormatException {
+
+    rejectLegacySmsVerificationInLocalMode();
 
     final Pair<String, PushNotification.TokenType> pushTokenAndType = validateAndExtractPushToken(
         request.updateVerificationSessionRequest());
@@ -271,6 +284,8 @@ public class VerificationController {
       @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
       @Context final ContainerRequestContext requestContext,
       @NotNull @Valid final UpdateVerificationSessionRequest updateVerificationSessionRequest) {
+
+    rejectLegacySmsVerificationInLocalMode();
 
     final String sourceHost = (String) requestContext.getProperty(RemoteAddressFilter.REMOTE_ADDRESS_ATTRIBUTE_NAME);
 
@@ -524,6 +539,8 @@ public class VerificationController {
   @ManagedAsync
   public VerificationSessionResponse getSession(@PathParam("sessionId") final String encodedSessionId) {
 
+    rejectLegacySmsVerificationInLocalMode();
+
     final RegistrationServiceSession registrationServiceSession = retrieveRegistrationServiceSession(encodedSessionId);
     final VerificationSession verificationSession = retrieveVerificationSession(registrationServiceSession);
 
@@ -575,6 +592,8 @@ public class VerificationController {
       final Optional<String> acceptLanguage,
       @NotNull @Valid final VerificationCodeRequest verificationCodeRequest,
       @Context final ContainerRequestContext requestContext) throws Throwable {
+
+    rejectLegacySmsVerificationInLocalMode();
 
     final RegistrationServiceSession registrationServiceSession = retrieveRegistrationServiceSession(encodedSessionId);
 
@@ -709,6 +728,8 @@ public class VerificationController {
   public VerificationSessionResponse verifyCode(@PathParam("sessionId") final String encodedSessionId,
       @HeaderParam(HttpHeaders.USER_AGENT) final String userAgent,
       @NotNull @Valid final SubmitVerificationCodeRequest submitVerificationCodeRequest) {
+
+    rejectLegacySmsVerificationInLocalMode();
 
     final RegistrationServiceSession registrationServiceSession = retrieveRegistrationServiceSession(encodedSessionId);
     final VerificationSession verificationSession = retrieveVerificationSession(registrationServiceSession);
