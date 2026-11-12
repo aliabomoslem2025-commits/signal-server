@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/rand"
@@ -17,6 +16,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -429,12 +429,13 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			idHash := s.hashAndroidID(request.AndroidID)
-			_, err = s.db.ExecContext(r.Context(), `
+			err = s.db.QueryRowContext(r.Context(), `
 				INSERT INTO local_auth_devices(id, phone, android_id_hash, public_key_pem, label, active)
 				VALUES($1, $2, $3, $4, $5, TRUE)
 				ON CONFLICT(phone, android_id_hash) DO UPDATE SET
 					public_key_pem = EXCLUDED.public_key_pem, label = EXCLUDED.label,
-					active = TRUE`, deviceID, phone, idHash, strings.TrimSpace(request.PublicKeyPEM), request.Label)
+					active = TRUE
+				RETURNING id`, deviceID, phone, idHash, strings.TrimSpace(request.PublicKeyPEM), request.Label).Scan(&deviceID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "could not enroll device")
 				return
@@ -568,7 +569,7 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonceEncoded := base64.RawURLEncoding.EncodeToString(nonce)
-	message := []byte("signal-local-auth-v1\n" + request.ChallengeID + "\n" + phone + "\n" + hex.EncodeToString(idHash) + "\n" + nonceEncoded)
+	message := []byte("signal-local-auth-v1\n" + request.ChallengeID + "\n" + phone + "\n"\n" + nonceEncoded)
 	// The Android client signs this canonical message using the device's non-exportable Keystore private key.
 	digest := sha256.Sum256(message)
 	if !ecdsa.VerifyASN1(publicKey, digest[:], signature) {
