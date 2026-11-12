@@ -622,16 +622,25 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	var expires time.Time
 	var verified sql.NullTime
 	var completed sql.NullTime
+	var codeAttempts int
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT phone, android_id_hash, code_hash, expires_at, verified_at, completed_at
+		SELECT phone, android_id_hash, code_hash, expires_at, verified_at, completed_at, code_attempts
 		FROM local_auth_challenges WHERE id = $1 FOR UPDATE`, request.ChallengeID).
-		Scan(&phone, &idHash, &storedCodeHash, &expires, &verified, &completed)
-	if err != nil || !verified.Valid || completed.Valid || time.Now().UTC().After(expires) {
+		Scan(&phone, &idHash, &storedCodeHash, &expires, &verified, &completed, &codeAttempts)
+	if err != nil || !verified.Valid || completed.Valid || codeAttempts >= 5 || time.Now().UTC().After(expires) {
 		writeError(w, http.StatusUnauthorized, "verification code is invalid or expired")
 		return
 	}
 	providedHash := s.hashCode(request.ChallengeID, request.Code)
 	if !hmac.Equal(storedCodeHash, providedHash) {
+		if _, updateErr := tx.ExecContext(r.Context(), "UPDATE local_auth_challenges SET code_attempts = code_attempts + 1 WHERE id = $1", request.ChallengeID); updateErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not record verification attempt")
+			return
+		}
+		if commitErr := tx.Commit(); commitErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not record verification attempt")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "verification code is invalid or expired")
 		return
 	}
