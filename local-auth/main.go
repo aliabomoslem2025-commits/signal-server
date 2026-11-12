@@ -498,9 +498,13 @@ func (s *server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var recent int
-	_ = s.db.QueryRowContext(r.Context(), `
+	if err := s.db.QueryRowContext(r.Context(), `
 		SELECT COUNT(*) FROM local_auth_challenges
-		WHERE phone = $1 AND created_at > NOW() - INTERVAL '10 minutes'`, request.Phone).Scan(&recent)
+		WHERE (phone = $1 OR android_id_hash = $2)
+		  AND created_at > NOW() - INTERVAL '10 minutes'`, request.Phone, idHash).Scan(&recent); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not check authentication rate limit")
+		return
+	}
 	if recent >= 10 {
 		writeError(w, http.StatusTooManyRequests, "too many authentication attempts")
 		return
@@ -699,8 +703,12 @@ func (s *server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
 	var expires time.Time
 	var consumed sql.NullTime
 	err = s.db.QueryRowContext(r.Context(), `
-		SELECT phone, android_id_hash, expires_at, consumed_at
-		FROM local_auth_tickets WHERE jti = $1`, claims.JTI).
+		SELECT t.phone, t.android_id_hash, t.expires_at, t.consumed_at
+		FROM local_auth_tickets t
+		JOIN local_auth_users u ON u.phone = t.phone AND u.active = TRUE
+		JOIN local_auth_devices d ON d.phone = t.phone
+		  AND d.android_id_hash = t.android_id_hash AND d.active = TRUE
+		WHERE t.jti = $1`, claims.JTI).
 		Scan(&phone, &idHash, &expires, &consumed)
 	if err != nil || consumed.Valid || time.Now().UTC().After(expires) ||
 		phone != claims.Phone || hex.EncodeToString(idHash) != claims.AndroidIDHash {
@@ -737,8 +745,13 @@ func (s *server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
 	var expires time.Time
 	var consumed sql.NullTime
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT phone, android_id_hash, expires_at, consumed_at
-		FROM local_auth_tickets WHERE jti = $1 FOR UPDATE`, claims.JTI).
+		SELECT t.phone, t.android_id_hash, t.expires_at, t.consumed_at
+		FROM local_auth_tickets t
+		JOIN local_auth_users u ON u.phone = t.phone AND u.active = TRUE
+		JOIN local_auth_devices d ON d.phone = t.phone
+		  AND d.android_id_hash = t.android_id_hash AND d.active = TRUE
+		WHERE t.jti = $1
+		FOR UPDATE OF t`, claims.JTI).
 		Scan(&phone, &idHash, &expires, &consumed)
 	if err != nil || consumed.Valid || time.Now().UTC().After(expires) ||
 		phone != claims.Phone || hex.EncodeToString(idHash) != claims.AndroidIDHash {
