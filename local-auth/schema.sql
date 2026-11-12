@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS local_auth_challenges (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
+  code_attempts INTEGER NOT NULL DEFAULT 0,
   verified_at TIMESTAMPTZ,
   code_hash BYTEA,
   completed_at TIMESTAMPTZ
