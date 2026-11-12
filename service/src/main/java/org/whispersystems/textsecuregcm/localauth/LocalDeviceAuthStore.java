@@ -240,6 +240,7 @@ public final class LocalDeviceAuthStore {
     item.put("androidId", s(androidId));
     item.put("codeHash", s(hash(sessionId + ":" + code)));
     item.put("codeVerified", bool(false));
+    item.put("attempts", n(0));
     item.put("expiresAt", n(expiresAt));
     item.put("createdAt", n(clock.instant().getEpochSecond()));
     dynamoDb.putItem(PutItemRequest.builder().tableName(tableName).item(item).build());
@@ -247,12 +248,13 @@ public final class LocalDeviceAuthStore {
     return sessionId;
   }
 
-  /** Verifies the six-digit code returned through the authenticated LAN response. */
+  /** Verifies a one-time code and atomically limits guesses to five per registration session. */
   public boolean verifyRegistrationCode(final String phoneNumber, final String sessionId, final String code) {
     final Map<String, AttributeValue> item = get("SESSION#" + sessionId, "VERIFIED");
     if (item.isEmpty()
         || !phoneNumber.equals(value(item, "phoneNumber"))
         || booleanValue(item, "codeVerified")
+        || number(item, "attempts") >= 5
         || number(item, "expiresAt") <= clock.instant().getEpochSecond()) {
       return false;
     }
@@ -261,6 +263,22 @@ public final class LocalDeviceAuthStore {
     final String actualHash = hash(sessionId + ":" + code);
     if (!MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.US_ASCII),
         actualHash.getBytes(StandardCharsets.US_ASCII))) {
+      try {
+        dynamoDb.updateItem(UpdateItemRequest.builder()
+            .tableName(tableName)
+            .key(key("SESSION#" + sessionId, "VERIFIED"))
+            .updateExpression("SET attempts = if_not_exists(attempts, :zero) + :one")
+            .conditionExpression("codeVerified = :false AND expiresAt > :now AND (attribute_not_exists(attempts) OR attempts < :max)")
+            .expressionAttributeValues(Map.of(
+                ":zero", n(0),
+                ":one", n(1),
+                ":max", n(5),
+                ":false", bool(false),
+                ":now", n(clock.instant().getEpochSecond())))
+            .build());
+      } catch (ConditionalCheckFailedException ignored) {
+        // The session expired, was already verified, or exhausted its attempt budget concurrently.
+      }
       recordEvent("AUTH_CODE_REJECTED", phoneNumber, value(item, "androidId"), false);
       return false;
     }
@@ -270,13 +288,33 @@ public final class LocalDeviceAuthStore {
           .tableName(tableName)
           .key(key("SESSION#" + sessionId, "VERIFIED"))
           .updateExpression("SET codeVerified = :true")
-          .conditionExpression("codeVerified = :false AND expiresAt > :now")
+          .conditionExpression("codeVerified = :false AND expiresAt > :now AND (attribute_not_exists(attempts) OR attempts < :max)")
           .expressionAttributeValues(Map.of(
               ":true", bool(true),
               ":false", bool(false),
+              ":max", n(5),
               ":now", n(clock.instant().getEpochSecond())))
           .build());
       recordEvent("AUTH_CODE_ACCEPTED", phoneNumber, value(item, "androidId"), true);
+      return true;
+    } catch (ConditionalCheckFailedException e) {
+      return false;
+    }
+  }
+
+  /** Updates device activity only while the administrator-managed device binding remains enabled. */
+  public boolean recordDeviceAuthenticated(final String phoneNumber, final String androidId) {
+    final long now = clock.instant().getEpochSecond();
+    try {
+      dynamoDb.updateItem(UpdateItemRequest.builder()
+          .tableName(tableName)
+          .key(key(devicePk(phoneNumber), deviceSk(androidId)))
+          .updateExpression("SET lastSeenAt = :now, updatedAt = :now")
+          .conditionExpression("enabled = :enabled")
+          .expressionAttributeValues(Map.of(
+              ":now", n(now),
+              ":enabled", bool(true)))
+          .build());
       return true;
     } catch (ConditionalCheckFailedException e) {
       return false;
