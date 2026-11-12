@@ -312,7 +312,18 @@ public class RegistrationController {
             registrationRequest.deviceActivationRequest().gcmToken()),
         userAgent);
 
-    if (verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
+    final byte[] decodedRegistrationSessionId = StringUtils.isNotBlank(registrationRequest.sessionId())
+        ? registrationRequest.decodeSessionId()
+        : null;
+    if (phoneVerificationTokenManager.isLocalAuthSession(decodedRegistrationSessionId)) {
+      try {
+        phoneVerificationTokenManager.consumeLocalAuthSession(number, decodedRegistrationSessionId);
+      } catch (final InvalidRegistrationSessionException e) {
+        throw new BadRequestException(e.getMessage());
+      } catch (final IOException e) {
+        throw new ServiceUnavailableException("local authentication service unavailable");
+      }
+    } else if (verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
       try {
         registrationFraudChecker.handleVerificationCompleted(registrationRequest.sessionId(), account);
       } catch (final Exception e) {
