@@ -36,7 +36,7 @@ Internal (Authorization: Bearer LOCAL_AUTH_INTERNAL_TOKEN):
   Returns the verified phone and device binding once; replay attempts are rejected.
 
 The canonical signed challenge message is:
-`signal-local-auth-v1\n{challengeId}\n{phone}\n{androidId}\n{base64(nonce)}`
+`signal-local-auth-v1\n{challengeId}\n{phone}\n{base64(nonce)}`
 
 ## Deploy
 
