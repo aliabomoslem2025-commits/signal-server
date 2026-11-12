@@ -79,6 +79,11 @@ public class PhoneVerificationTokenManager {
       throw new IllegalArgumentException("Exactly one of session ID or recovery password must non-null");
     }
 
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled() &&
+        (sessionId == null || !LocalAuthTicketClient.isLocalAuthSession(sessionId))) {
+      throw new InvalidRegistrationSessionException("SMS and phone-call verification are disabled; a LAN device-authentication ticket is required");
+    }
+
     final PhoneVerificationRequest.VerificationType verificationType = sessionId != null
         ? PhoneVerificationRequest.VerificationType.SESSION
         : PhoneVerificationRequest.VerificationType.RECOVERY_PASSWORD;
