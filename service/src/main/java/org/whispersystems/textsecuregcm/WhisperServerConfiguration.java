@@ -45,6 +45,7 @@ import org.whispersystems.textsecuregcm.configuration.HlrLookupConfiguration;
 import org.whispersystems.textsecuregcm.configuration.IdlePrimaryDeviceReminderConfiguration;
 import org.whispersystems.textsecuregcm.configuration.KeyTransparencyServiceConfiguration;
 import org.whispersystems.textsecuregcm.configuration.LinkDeviceSecretConfiguration;
+import org.whispersystems.textsecuregcm.configuration.LocalDeviceAuthConfiguration;
 import org.whispersystems.textsecuregcm.configuration.LoginPurchaseConfiguration;
 import org.whispersystems.textsecuregcm.configuration.MessageByteLimitCardinalityEstimatorConfiguration;
 import org.whispersystems.textsecuregcm.configuration.OneTimeDonationConfiguration;
@@ -123,6 +124,10 @@ public class WhisperServerConfiguration extends Configuration {
   @Valid
   @JsonProperty
   private DynamoDbTables dynamoDbTables;
+
+  @Valid
+  @JsonProperty
+  private LocalDeviceAuthConfiguration localDeviceAuth = new LocalDeviceAuthConfiguration();
 
   @NotNull
   @Valid
@@ -429,6 +434,10 @@ public class WhisperServerConfiguration extends Configuration {
 
   public DynamoDbTables getDynamoDbTables() {
     return dynamoDbTables;
+  }
+
+  public LocalDeviceAuthConfiguration getLocalDeviceAuthConfiguration() {
+    return localDeviceAuth;
   }
 
   public ShortCodeExpanderConfiguration getShortCodeRetrieverConfiguration() {
