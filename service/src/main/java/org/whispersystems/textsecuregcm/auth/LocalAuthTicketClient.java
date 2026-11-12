@@ -44,10 +44,21 @@ public final class LocalAuthTicketClient {
    * Local-auth integration is opt-in until the sidecar and client have been deployed together.
    * A partial configuration is a startup error; silently falling back could re-enable external SMS.
    */
+  public static boolean isLocalAuthOnlyEnabled() {
+    final String configured = System.getenv("LOCAL_AUTH_ONLY");
+    if (configured == null || configured.isBlank()) {
+      return System.getenv("LOCAL_AUTH_INTERNAL_URL") != null && !System.getenv("LOCAL_AUTH_INTERNAL_URL").isBlank();
+    }
+    return Boolean.parseBoolean(configured);
+  }
+
   public static Optional<LocalAuthTicketClient> fromEnvironment() {
     final String endpoint = System.getenv("LOCAL_AUTH_INTERNAL_URL");
     final String token = System.getenv("LOCAL_AUTH_INTERNAL_TOKEN");
     if ((endpoint == null || endpoint.isBlank()) && (token == null || token.isBlank())) {
+      if (isLocalAuthOnlyEnabled()) {
+        throw new IllegalStateException("LOCAL_AUTH_ONLY is enabled but LOCAL_AUTH_INTERNAL_URL and LOCAL_AUTH_INTERNAL_TOKEN are missing");
+      }
       return Optional.empty();
     }
     if (endpoint == null || endpoint.isBlank() || token == null || token.length() < 32) {
