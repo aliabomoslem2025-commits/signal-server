@@ -91,6 +91,8 @@ import org.whispersystems.textsecuregcm.asn.AsnInfoProviderImpl;
 import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
+import org.whispersystems.textsecuregcm.auth.LocalDeviceAuthManager;
+import org.whispersystems.textsecuregcm.controllers.LocalDeviceAuthController;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.CertificateGenerator;
 import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
@@ -1128,8 +1130,13 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             config.getDeliveryCertificate().expiresDays(),
             config.getDeliveryCertificate().embedSigner());
 
+    final LocalDeviceAuthManager localDeviceAuthManager = config.getLocalDeviceAuthConfiguration().isEnabled()
+        ? new LocalDeviceAuthManager(dynamoDbClient, config.getLocalDeviceAuthConfiguration(), clock)
+        : null;
+
     final PhoneVerificationTokenManager phoneVerificationTokenManager = new PhoneVerificationTokenManager(
-        phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager, registrationRecoveryChecker);
+        phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager,
+        registrationRecoveryChecker, localDeviceAuthManager);
 
     final ChangeNumberManager changeNumberManager = new ChangeNumberManager(messageSender, accountsManager,
         phoneVerificationTokenManager, registrationLockVerificationManager, rateLimiters,
@@ -1352,6 +1359,10 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             donationPermitsManager),
         new LoginPurchaseController(loginPurchaseManager, dynamicConfigurationManager)
     );
+
+    if (localDeviceAuthManager != null) {
+      commonControllers.add(new LocalDeviceAuthController(localDeviceAuthManager, config.getLocalDeviceAuthConfiguration()));
+    }
 
     for (Object controller : commonControllers) {
       environment.jersey().register(controller);
