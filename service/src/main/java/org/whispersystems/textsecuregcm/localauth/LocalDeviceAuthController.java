@@ -156,6 +156,9 @@ public final class LocalDeviceAuthController {
     if (!store.consumeChallenge(challenge.challengeId())) {
       throw new NotAuthorizedException("Challenge was already consumed");
     }
+    if (!store.recordDeviceAuthenticated(challenge.phoneNumber(), challenge.androidId())) {
+      throw new NotAuthorizedException("Device is no longer authorized");
+    }
 
     final String code = "%06d".formatted(RANDOM.nextInt(1_000_000));
     final long expiresAt = clock.instant().getEpochSecond() + REGISTRATION_SESSION_TTL_SECONDS;
