@@ -252,9 +252,9 @@ public class IdleWakeupEligibilityCheckerTest {
     }
 
     {
-      // FCM token
+      // ntfy topic
       final Device device = mock(Device.class);
-      when(device.getGcmId()).thenReturn("fcm-token");
+      when(device.getNtfyTopic()).thenReturn("ntfy-topic");
 
       arguments.add(Arguments.of(device, true));
     }
