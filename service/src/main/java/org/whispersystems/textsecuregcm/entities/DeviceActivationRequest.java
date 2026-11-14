@@ -39,10 +39,8 @@ public record DeviceActivationRequest(
     Optional<@Valid ApnRegistrationId> apnToken,
 
     @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
-        An FCM/GCM token for the account's primary device. If provided, the account's primary
-        device will be notified of new messages via push notifications to the given token.
-        Callers must provide exactly one of an APNs token set, an FCM token, or an
-        `AccountAttributes` entity with `fetchesMessages` set to `true`.
+        APNs token for the account's primary device. Android push topics are provisioned after
+        registration through the authenticated account API.
         """)
-    Optional<@Valid GcmRegistrationId> gcmToken) {
+    Optional<@Valid ApnRegistrationId> apnToken) {
 }
