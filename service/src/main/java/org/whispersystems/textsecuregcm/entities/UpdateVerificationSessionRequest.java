@@ -30,8 +30,7 @@ public record UpdateVerificationSessionRequest(
 
   public enum PushTokenType {
     @JsonProperty("apn")
-    APN,
-    ;
+    APN;
 
     public PushNotification.TokenType toTokenType() {
       return switch (this) {
