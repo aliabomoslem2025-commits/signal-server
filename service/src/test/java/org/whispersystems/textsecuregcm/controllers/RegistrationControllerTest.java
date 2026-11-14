@@ -93,7 +93,6 @@ import org.whispersystems.textsecuregcm.entities.AccountIdentityResponse;
 import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
 import org.whispersystems.textsecuregcm.entities.DeviceActivationRequest;
 import org.whispersystems.textsecuregcm.entities.ECSignedPreKey;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.entities.KEMSignedPreKey;
 import org.whispersystems.textsecuregcm.entities.PhoneVerificationRequest;
 import org.whispersystems.textsecuregcm.entities.RegistrationRequest;
@@ -1591,7 +1590,6 @@ class RegistrationControllerTest {
             .setUnidentifiedAccessKey(TestRandomUtil.nextBytes(16));
 
     final String apnsToken = "apns-token";
-    final String gcmToken = "gcm-token";
 
     return List.of(
         Arguments.argumentSet("Fetches messages; no push tokens",
