@@ -9,7 +9,6 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
-import java.util.Map;
 import java.util.stream.IntStream;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Metrics;
@@ -25,7 +24,6 @@ import org.signal.chat.common.UploadForm;
 import org.signal.chat.errors.FailedPrecondition;
 import org.whispersystems.textsecuregcm.attachments.AttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.AttachmentUtil;
-import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.grpc.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.grpc.AuthenticationUtil;
@@ -41,12 +39,11 @@ import org.whispersystems.textsecuregcm.s3.PostPolicyGenerator;
 
 public class AttachmentsGrpcService extends SimpleAttachmentsGrpc.AttachmentsImplBase {
 
-  private final ExperimentEnrollmentManager experimentEnrollmentManager;
   private final RateLimiter countRateLimiter;
   private final RateLimiter bytesRateLimiter;
   private final RateLimiter stickerPackLimiter;
   private final long maxUploadLength;
-  private final Map<Integer, AttachmentGenerator> attachmentGenerators;
+  private final TusAttachmentGenerator tusAttachmentGenerator;
   private final PostPolicyGenerator stickerPolicyGenerator;
   private final Clock clock;
   private final SecureRandom secureRandom;
@@ -60,14 +57,11 @@ public class AttachmentsGrpcService extends SimpleAttachmentsGrpc.AttachmentsImp
       MetricsUtil.name(AttachmentsGrpcService.class, "attachmentSize");
 
   public AttachmentsGrpcService(
-      final ExperimentEnrollmentManager experimentEnrollmentManager,
       final RateLimiters rateLimiters,
-      final GcsAttachmentGenerator gcsAttachmentGenerator,
       final TusAttachmentGenerator tusAttachmentGenerator,
       final PostPolicyGenerator stickerPolicyGenerator,
       final long maxUploadLength,
       final Clock clock) {
-    this.experimentEnrollmentManager = experimentEnrollmentManager;
     this.countRateLimiter = rateLimiters.getAttachmentLimiter();
     this.bytesRateLimiter = rateLimiters.getAttachmentBytesLimiter();
     this.stickerPackLimiter = rateLimiters.getStickerPackLimiter();
@@ -75,9 +69,7 @@ public class AttachmentsGrpcService extends SimpleAttachmentsGrpc.AttachmentsImp
     this.maxUploadLength = maxUploadLength;
     this.clock = clock;
     this.secureRandom = new SecureRandom();
-    this.attachmentGenerators = Map.of(
-        2, gcsAttachmentGenerator,
-        3, tusAttachmentGenerator);
+    this.tusAttachmentGenerator = tusAttachmentGenerator;
   }
 
   @Override
@@ -105,13 +97,10 @@ public class AttachmentsGrpcService extends SimpleAttachmentsGrpc.AttachmentsImp
         .record(request.getUploadLength());
 
     final String key = AttachmentUtil.generateAttachmentKey(secureRandom);
-    final boolean useCdn3 = this.experimentEnrollmentManager.isEnrolled(auth.accountIdentifier(),
-        AttachmentUtil.CDN3_EXPERIMENT_NAME);
-    final int cdn = useCdn3 ? 3 : 2;
     final AttachmentGenerator.Descriptor descriptor =
-        this.attachmentGenerators.get(cdn).generateAttachment(key, request.getUploadLength());
+        tusAttachmentGenerator.generateAttachment(key, request.getUploadLength());
     return GetUploadFormResponse.newBuilder().setUploadForm(UploadForm.newBuilder()
-        .setCdn(cdn)
+        .setCdn(3)
         .setKey(key)
         .putAllHeaders(descriptor.headers())
         .setSignedUploadLocation(descriptor.signedUploadLocation()))
