@@ -45,6 +45,7 @@ import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusConfiguration;
 import org.whispersystems.textsecuregcm.configuration.secrets.SecretBytes;
 import org.whispersystems.textsecuregcm.controllers.RateLimitExceededException;
+import org.whispersystems.textsecuregcm.experiment.ExperimentEnrollmentManager;
 import org.whispersystems.textsecuregcm.limits.RateLimiter;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
 import org.whispersystems.textsecuregcm.s3.PostPolicyGenerator;
@@ -54,6 +55,9 @@ import org.whispersystems.textsecuregcm.util.TestRandomUtil;
 class AttachmentsGrpcServiceTest extends
     SimpleBaseGrpcTest<AttachmentsGrpcService, AttachmentsGrpc.AttachmentsBlockingStub> {
 
+  @Mock
+  private ExperimentEnrollmentManager experimentEnrollmentManager;
+
   private static final byte[] TUS_SECRET = TestRandomUtil.nextBytes(32);
   private static final String TUS_URL = "https://example.com/uploads";
   private static final int MAX_UPLOAD_LENGTH = 1000;
@@ -62,6 +66,8 @@ class AttachmentsGrpcServiceTest extends
   private RateLimiter countRateLimiter;
   @Mock
   private RateLimiter byteRateLimiter;
+  @Mock
+  private RateLimiter stickerPackLimiter;
   @Mock
   private RateLimiter stickerRateLimiter;
 
