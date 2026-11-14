@@ -111,7 +111,7 @@ public class PushNotificationManager {
     final Pair<String, PushNotification.TokenType> tokenAndType;
 
     if (StringUtils.isNotBlank(device.getNtfyTopic())) {
-      tokenAndType = new Pair<>(device.getGcmId(), PushNotification.TokenType.NTFY);
+      tokenAndType = new Pair<>(device.getNtfyTopic(), PushNotification.TokenType.NTFY);
     } else if (StringUtils.isNotBlank(device.getApnId())) {
       tokenAndType = new Pair<>(device.getApnId(), PushNotification.TokenType.APN);
     } else {
