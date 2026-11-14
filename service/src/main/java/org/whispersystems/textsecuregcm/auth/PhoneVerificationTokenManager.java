@@ -33,13 +33,13 @@ public class PhoneVerificationTokenManager {
 
   private final PhoneNumberIdentifiers phoneNumberIdentifiers;
 
-  private final RegistrationServiceClient registrationServiceClient;
+  private final @Nullable RegistrationServiceClient registrationServiceClient;
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
   private final Optional<LocalAuthTicketClient> localAuthTicketClient;
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
-      final RegistrationServiceClient registrationServiceClient,
+      @Nullable final RegistrationServiceClient registrationServiceClient,
       final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
       final RegistrationRecoveryChecker registrationRecoveryChecker) {
     this.phoneNumberIdentifiers = phoneNumberIdentifiers;
@@ -106,6 +106,10 @@ public class PhoneVerificationTokenManager {
 
   private void verifyBySessionId(final String number, final byte[] sessionId)
       throws UnverifiedRegistrationSessionException, InvalidRegistrationSessionException, IOException {
+    if (registrationServiceClient == null) {
+      throw new IOException("external registration verification is disabled on this server");
+    }
+
     try {
       final RegistrationServiceSession session = registrationServiceClient
           .getSession(sessionId, REGISTRATION_RPC_TIMEOUT)
@@ -132,8 +136,8 @@ public class PhoneVerificationTokenManager {
   }
 
   /**
-   * Consume the LAN ticket only after Account creation succeeds. Validation happens before registration-lock checks,
-   * so a user can still complete an existing Signal registration-lock flow without burning the ticket prematurely.
+   * Consume the LAN ticket after all registration-lock and MFA checks, immediately before account creation.
+   * This prevents a replayed ticket from creating an account before the one-time redemption is rejected.
    */
   public void consumeLocalAuthSession(final String number, final byte[] sessionId)
       throws InterruptedException, InvalidRegistrationSessionException, IOException {
