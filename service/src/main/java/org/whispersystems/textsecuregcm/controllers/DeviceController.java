@@ -283,9 +283,9 @@ public class DeviceController {
 
     if (deviceActivationRequest.apnToken().isPresent()) {
       signalAgent = "OWP";
-    } else if (deviceActivationRequest.gcmToken().isPresent()) {
-      signalAgent = "OWA";
     } else {
+      // LAN push topics are provisioned after account registration.
+ else {
       signalAgent = "OWD";
     }
 
