@@ -33,13 +33,13 @@ public class PhoneVerificationTokenManager {
 
   private final PhoneNumberIdentifiers phoneNumberIdentifiers;
 
-  private final RegistrationServiceClient registrationServiceClient;
+  @Nullable private final RegistrationServiceClient registrationServiceClient;
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
   private final LocalDeviceAuthStore localDeviceAuthStore;
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
-      final RegistrationServiceClient registrationServiceClient,
+      @Nullable final RegistrationServiceClient registrationServiceClient,
       final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
       final RegistrationRecoveryChecker registrationRecoveryChecker) {
     this(phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager,
@@ -102,8 +102,17 @@ public class PhoneVerificationTokenManager {
 
   private void verifyBySessionId(final String number, final byte[] sessionId)
       throws UnverifiedRegistrationSessionException, InvalidRegistrationSessionException, IOException {
-    if (localDeviceAuthStore != null && localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId)) {
-      return;
+    if (localDeviceAuthStore != null) {
+      // In a local deployment, only sessions created and verified by the LAN device-auth flow are valid.
+      // Never fall back to the upstream registration service or its SMS/voice verification path.
+      if (localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId)) {
+        return;
+      }
+      throw new UnverifiedRegistrationSessionException();
+    }
+
+    if (registrationServiceClient == null) {
+      throw new UnverifiedRegistrationSessionException();
     }
 
     try {
