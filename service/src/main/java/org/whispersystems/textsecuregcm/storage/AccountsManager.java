@@ -247,7 +247,7 @@ public class AccountsManager extends RedisPubSubAdapter<String, String> implemen
 
   private enum PushTokenType {
     APNS("apns"),
-    FCM("fcm"),
+    NTFY("ntfy"),
     NONE("none");
 
     private final String tagValue;
@@ -264,7 +264,7 @@ public class AccountsManager extends RedisPubSubAdapter<String, String> implemen
       if (deviceSpec.apnRegistrationId().isPresent()) {
         return PushTokenType.APNS;
       } else if (deviceSpec.gcmRegistrationId().isPresent()) {
-        return PushTokenType.FCM;
+        return PushTokenType.NTFY;
       } else {
         return PushTokenType.NONE;
       }
@@ -274,7 +274,7 @@ public class AccountsManager extends RedisPubSubAdapter<String, String> implemen
       if (StringUtils.isNotBlank(device.getApnId())) {
         return PushTokenType.APNS;
       } else if (StringUtils.isNotBlank(device.getNtfyTopic())) {
-        return PushTokenType.FCM;
+        return PushTokenType.NTFY;
       } else {
         return PushTokenType.NONE;
       }
