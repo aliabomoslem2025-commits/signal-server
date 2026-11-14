@@ -1,16 +1,11 @@
 services:
   dynamodb:
-    image: amazon/dynamodb-local:3.3.0
+    image: amazon/dynamodb-local:3.3.2
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
     working_dir: /home/dynamodblocal
     restart: unless-stopped
     volumes:
       - calling-dynamodb:/home/dynamodblocal/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/shell/ >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
     networks: [calling-private]
 
   bootstrap:
@@ -19,12 +14,33 @@ services:
     restart: "no"
     depends_on:
       dynamodb:
-        condition: service_healthy
+        condition: service_started
     environment:
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local-only-not-a-cloud-credential
       AWS_REGION: us-west-1
     networks: [calling-private]
+
+  coturn:
+    image: coturn/coturn:4.18.0-r0
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --no-cli
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_STATIC_AUTH_SECRET:?Set TURN_STATIC_AUTH_SECRET; it must match the Signal Server turn.local.sharedSecret}
+      - --realm=${TURN_REALM:-signal.lan}
+      - --listening-ip=0.0.0.0
+      - --relay-ip=${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to the host LAN address}
+      - --external-ip=${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to the host LAN address}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+      - --no-loopback-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
 
   calling-backend:
     build:
