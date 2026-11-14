@@ -34,7 +34,7 @@ public record PushNotification(String deviceToken,
   }
 
   public enum TokenType {
-    FCM,
+    NTFY,
     APN
   }
 
