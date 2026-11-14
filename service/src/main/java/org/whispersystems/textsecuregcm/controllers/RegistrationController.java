@@ -328,7 +328,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().get())),
             registrationRequest.accountAttributes().getFetchesMessages(),
             registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            ),
         userAgent);
 
     if (!localAuthSession && verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
@@ -415,7 +415,7 @@ public class RegistrationController {
               Optional.empty(),
               registrationRequest.accountAttributes().getFetchesMessages(),
               registrationRequest.deviceActivationRequest().apnToken(),
-              registrationRequest.deviceActivationRequest().gcmToken()),
+              ),
           userAgent);
 
       Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
@@ -512,7 +512,7 @@ public class RegistrationController {
             Optional.empty(),
             registrationRequest.accountAttributes().getFetchesMessages(),
             registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            ),
         userAgent);
   }
 
