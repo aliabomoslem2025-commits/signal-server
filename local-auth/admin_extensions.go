@@ -38,7 +38,14 @@ func (s *server) handleAdminUserStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.db.ExecContext(r.Context(),
+	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update user status")
+		return
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(r.Context(),
 		"UPDATE local_auth_users SET active = $1, updated_at = NOW() WHERE phone = $2",
 		*request.Active, phone)
 	if err != nil {
@@ -52,7 +59,7 @@ func (s *server) handleAdminUserStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if changed == 0 {
 		var exists bool
-		if err := s.db.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM local_auth_users WHERE phone = $1)", phone).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM local_auth_users WHERE phone = $1)", phone).Scan(&exists); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not verify user")
 			return
 		}
@@ -60,6 +67,19 @@ func (s *server) handleAdminUserStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
+	}
+	if !*request.Active {
+		// Consume outstanding tickets so re-enabling the account cannot revive a ticket issued before suspension.
+		if _, err := tx.ExecContext(r.Context(),
+			"UPDATE local_auth_tickets SET consumed_at = NOW() WHERE phone = $1 AND consumed_at IS NULL",
+			phone); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not revoke outstanding registration tickets")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update user status")
+		return
 	}
 
 	event := "user.disabled"
@@ -143,7 +163,7 @@ func (s *server) recordAdminEvent(r *http.Request, eventType, target string, met
 	}
 	if _, err := s.db.ExecContext(r.Context(), `
 		INSERT INTO local_auth_admin_events(event_type, target, metadata, source_ip)
-		VALUES($1, $2, $3::jsonb, $4)`, eventType, target, encoded, sourceIP); err != nil {
+		VALUES($1, $2, $3::jsonb, $4)`, eventType, target, string(encoded), sourceIP); err != nil {
 		log.Printf("local-auth: failed to persist admin event %s for %s: %v", eventType, target, err)
 	}
 }
