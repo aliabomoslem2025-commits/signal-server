@@ -48,7 +48,7 @@ class PushNotificationSchedulerTest {
   private Device device;
 
   private APNSender apnSender;
-  private FcmSender fcmSender;
+  private NtfySender ntfySender;
   private TestClock clock;
 
   private PushNotificationScheduler pushNotificationScheduler;
@@ -79,17 +79,17 @@ class PushNotificationSchedulerTest {
         .thenReturn(CompletableFuture.completedFuture(Optional.of(account)));
 
     apnSender = mock(APNSender.class);
-    fcmSender = mock(FcmSender.class);
+    ntfySender = mock(NtfySender.class);
     clock = TestClock.now();
 
     when(apnSender.sendNotification(any()))
         .thenReturn(CompletableFuture.completedFuture(new SendPushNotificationResult(true, Optional.empty(), false, Optional.empty())));
 
-    when(fcmSender.sendNotification(any()))
+    when(ntfySender.sendNotification(any()))
         .thenReturn(CompletableFuture.completedFuture(new SendPushNotificationResult(true, Optional.empty(), false, Optional.empty())));
 
     pushNotificationScheduler = new PushNotificationScheduler(REDIS_CLUSTER_EXTENSION.getRedisCluster(),
-        apnSender, fcmSender, accountsManager, clock, 1, 1, mock(ScheduledExecutorService.class));
+        apnSender, ntfySender, accountsManager, clock, 1, 1, mock(ScheduledExecutorService.class));
   }
 
   @ParameterizedTest
@@ -168,7 +168,7 @@ class PushNotificationSchedulerTest {
 
     final ArgumentCaptor<PushNotification> notificationCaptor = ArgumentCaptor.forClass(PushNotification.class);
     verify(switch (tokenType) {
-      case FCM -> fcmSender;
+      case FCM -> ntfySender;
       case APN -> apnSender;
     }).sendNotification(notificationCaptor.capture());
 
@@ -265,7 +265,7 @@ class PushNotificationSchedulerTest {
 
     final AccountsManager accountsManager = mock(AccountsManager.class);
 
-    pushNotificationScheduler = new PushNotificationScheduler(redisCluster, apnSender, fcmSender,
+    pushNotificationScheduler = new PushNotificationScheduler(redisCluster, apnSender, ntfySender,
         accountsManager, dedicatedThreadCount, 1, mock(ScheduledExecutorService.class));
 
     pushNotificationScheduler.start();
