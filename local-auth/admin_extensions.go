@@ -1,9 +1,8 @@
 package main
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -142,7 +141,6 @@ func (s *server) recordAdminEvent(r *http.Request, eventType, target string, met
 	if host, _, splitErr := net.SplitHostPort(sourceIP); splitErr == nil {
 		sourceIP = host
 	}
-	
 	if _, err := s.db.ExecContext(r.Context(), `
 		INSERT INTO local_auth_admin_events(event_type, target, metadata, source_ip)
 		VALUES($1, $2, $3::jsonb, $4)`, eventType, target, encoded, sourceIP); err != nil {
