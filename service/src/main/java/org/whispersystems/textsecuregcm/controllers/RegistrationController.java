@@ -509,8 +509,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
             Optional.empty(),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            ),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
   }
 
