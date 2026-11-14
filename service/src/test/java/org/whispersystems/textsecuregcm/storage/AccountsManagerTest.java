@@ -1375,7 +1375,6 @@ class AccountsManagerTest {
                 new DeviceIdentityInfo(17, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                 Optional.of(new DeviceIdentityInfo(19, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                 true,
-                Optional.empty(),
                 Optional.empty()),
             linkDeviceToken));
 
