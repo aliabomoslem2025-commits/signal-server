@@ -111,7 +111,7 @@ public class PushNotificationManager {
     final Pair<String, PushNotification.TokenType> tokenAndType;
 
     if (StringUtils.isNotBlank(device.getNtfyTopic())) {
-      tokenAndType = new Pair<>(device.getGcmId(), PushNotification.TokenType.FCM);
+      tokenAndType = new Pair<>(device.getGcmId(), PushNotification.TokenType.NTFY);
     } else if (StringUtils.isNotBlank(device.getApnId())) {
       tokenAndType = new Pair<>(device.getApnId(), PushNotification.TokenType.APN);
     } else {
@@ -134,7 +134,7 @@ public class PushNotificationManager {
     }
 
     final PushNotificationSender sender = switch (pushNotification.tokenType()) {
-      case FCM -> ntfySender;
+      case NTFY -> ntfySender;
       case APN -> apnSender;
     };
 
@@ -221,7 +221,7 @@ public class PushNotificationManager {
               // Don't clear the token if it's already changed
               if (originalToken.equals(getPushToken(d, tokenType))) {
                 switch (tokenType) {
-                  case FCM -> d.setNtfyTopic(null);
+                  case NTFY -> d.setNtfyTopic(null);
                   case APN -> d.setApnId(null);
                 }
               }
@@ -230,7 +230,7 @@ public class PushNotificationManager {
 
   private static String getPushToken(final Device device, final PushNotification.TokenType tokenType) {
     return switch (tokenType) {
-      case FCM -> device.getNtfyTopic();
+      case NTFY -> device.getNtfyTopic();
       case APN -> device.getApnId();
     };
   }
