@@ -110,7 +110,7 @@ public class AccountController {
       if (StringUtils.isBlank(device.getNtfyTopic())) {
         final byte[] entropy = new byte[24];
         NTFY_TOPIC_RANDOM.nextBytes(entropy);
-        device.setNtfyTopic(Base64.getUrlEncoder().withoutPadding().encodeToString(entropy));
+        device.setNtfyTopic("signal-" + Base64.getUrlEncoder().withoutPadding().encodeToString(entropy));
         device.setApnId(null);
         device.setFetchesMessages(false);
       }
