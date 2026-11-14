@@ -1,60 +1,108 @@
-# Local Device Authentication Service
+# Signal LAN local device authentication
 
-This is a production-oriented LAN authentication control-plane component for the customized Signal deployment. It replaces SMS as the device authorization factor with a provisioned phone-number + Android-ID-hash + Android Keystore public-key binding.
+This service is the local-only registration factor for the customized Signal Android + Signal Server deployment. It replaces SMS and voice verification with a pre-enrolled device proof:
 
-## Important integration boundary
+1. An administrator creates a user by E.164 phone number in the Signal LAN dashboard.
+2. The administrator enrolls the Android ID and the device's ECDSA P-256 public key. The private key is generated and retained by Android Keystore.
+3. The app requests a short-lived challenge for the phone + Android ID.
+4. The app signs the canonical challenge with the device private key. The sidecar checks the signature against the enrolled public key.
+5. The sidecar returns a six-digit one-time code over HTTPS. The Android app transfers it directly into the registration screen; no SMS receiver or phone-call transport is used.
+6. The app submits the code. The sidecar returns a short-lived, single-use registration ticket wrapped as Signal's `sessionId`.
+7. Signal Server validates that ticket and redeems it once immediately before creating the Signal account. Signal's normal ACI/PNI, identity-key, pre-key, and account-creation code remains in place.
 
-This service is **not yet wired into Signal's Java RegistrationController or the Android registration flow**. It provides the persistent enrollment/authentication API and an internal one-time registration-ticket redemption endpoint. The Signal-server and Signal-app adapters must call these endpoints before this can replace Signal registration verification end-to-end. Do not deploy this as if it alone completes Signal registration.
+Android ID is only a lookup attribute. It is not treated as a secret or proof of possession. The ECDSA signature from the Android Keystore key is the device proof.
 
-## Security model
+## Local-auth-only mode in Signal Server
 
-- Android ID is a lookup attribute, not a secret or authenticator.
-- The admin provisions each device's ECDSA P-256 public key.
-- The Android app must create the corresponding private key in Android Keystore and sign the server challenge using SHA256withECDSA.
-- The service returns the short-lived one-time code only after successful signature verification. The code is transported over HTTPS/WSS-protected LAN TLS, never SMS.
-- Registration tickets are HMAC-signed, short-lived, and stored server-side. The internal consume endpoint atomically marks a ticket as consumed.
-- Admin and internal endpoints require separate high-entropy bearer tokens.
-- Use HTTPS even inside the LAN. Do not set cleartext traffic or disable certificate validation.
+Set the following environment variables on the Java Signal Server process:
 
-## API
+- `LOCAL_AUTH_ONLY=true`
+- `LOCAL_AUTH_INTERNAL_URL=https://local-auth.internal.example`
+- `LOCAL_AUTH_INTERNAL_TOKEN=<same high-entropy secret as LOCAL_AUTH_INTERNAL_TOKEN in the sidecar>`
 
-Public:
-- `POST /v1/local-auth/challenge` body: `{ "phone": "+...", "androidId": "..." }`
-- `POST /v1/local-auth/verify` body: `{ "challengeId": "...", "signature": "<base64 ASN.1 ECDSA>" }`
-- `POST /v1/local-auth/complete` body: `{ "challengeId": "...", "code": "123456" }`
+The Java server requires an HTTPS internal URL. Install the private CA certificate that signs this endpoint into the Java runtime trust store used by the Signal Server process (or provide a JVM trust store with `-Djavax.net.ssl.trustStore=...` and `-Djavax.net.ssl.trustStorePassword=...`). Do not disable hostname or certificate validation.
 
-Admin (Authorization: Bearer LOCAL_AUTH_ADMIN_TOKEN):
+When local-auth-only mode is enabled:
+- the Java server does not construct or manage the external registration-service client;
+- the legacy `/v1/verification` controller is not registered at all;
+- registration requests without a valid LAN ticket are rejected (including SMS/voice session IDs and recovery-password fallback);
+- the LAN ticket is validated first and consumed exactly once, before Signal account creation.
+
+When local-auth-only is disabled, the upstream Signal verification flow remains available. Do not use that mode for an isolated LAN deployment.
+
+## Sidecar API
+
+The Go sidecar uses PostgreSQL and exposes the following routes.
+
+Public app endpoints:
+- `POST /v1/local-auth/challenge` — body `{"phone":"+4915112345678","androidId":"..."}`
+- `POST /v1/local-auth/verify` — body `{"challengeId":"...","signature":"<base64 ASN.1 ECDSA>"}`
+- `POST /v1/local-auth/complete` — body `{"challengeId":"...","code":"123456"}`
+
+The Android app signs this exact UTF-8 message:
+
+```text
+signal-local-auth-v1
+{challengeId}
+{phone}
+{base64url(nonce)}
+```
+
+The sidecar replies with the six-digit code only after signature validation. The code is never sent by SMS.
+
+Dashboard endpoints (all require `Authorization: Bearer <LOCAL_AUTH_ADMIN_TOKEN>`):
 - `GET /v1/local-auth/admin/users`
-- `POST /v1/local-auth/admin/users` body: `{ "phone": "+...", "displayName": "..." }`
+- `POST /v1/local-auth/admin/users` body `{"phone":"+...","displayName":"..."}`
 - `DELETE /v1/local-auth/admin/users/{phone}`
 - `GET /v1/local-auth/admin/users/{phone}/devices`
-- `POST /v1/local-auth/admin/users/{phone}/devices` body: `{ "androidId": "...", "publicKeyPem": "-----BEGIN PUBLIC KEY-----...", "label": "..." }`
+- `POST /v1/local-auth/admin/users/{phone}/devices` body `{"androidId":"...","publicKeyPem":"-----BEGIN PUBLIC KEY-----...","label":"..."}`
 - `DELETE /v1/local-auth/admin/devices/{deviceId}`
 
-Internal (Authorization: Bearer LOCAL_AUTH_INTERNAL_TOKEN):
-- `POST /v1/local-auth/internal/consume-ticket` body: `{ "ticket": "lan1.payload.signature" }`
-  Returns the verified phone and device binding once; replay attempts are rejected.
+Internal Signal Server endpoints (all require `Authorization: Bearer <LOCAL_AUTH_INTERNAL_TOKEN>`):
+- `POST /v1/local-auth/internal/validate-ticket`
+- `POST /v1/local-auth/internal/consume-ticket`
 
-The canonical signed challenge message is:
-`signal-local-auth-v1\n{challengeId}\n{phone}\n{base64(nonce)}`
+Tickets are HMAC-signed, expire after two minutes, are stored server-side, and cannot be redeemed twice. The internal consume operation uses a database transaction and row lock.
 
-## Deploy
+## Deploy the Go sidecar
 
-1. Generate four independent random secrets (at least 32 random bytes each): database password, admin token, internal token, ticket HMAC secret, and Android-ID hash secret.
-2. Store them in a protected `.env` file, never in Git.
-3. Put this service behind the LAN reverse proxy with a valid private CA certificate and expose only HTTPS.
-4. Keep PostgreSQL and port 8090 private. Do not expose the database to client VLANs.
-5. Run `docker compose up -d --build`.
-6. Configure the dashboard's API base URL and admin token.
-7. Enroll the user and the device public key before allowing login.
+1. Copy `.env.example` to `.env` and generate five independent secrets. For example, use `openssl rand -hex 32` separately for the database password, admin token, internal token, ticket HMAC secret, and Android-ID hash secret. Never commit the resulting `.env`.
+2. Run the stack:
 
-The compose file deliberately binds port 8090 to loopback. Configure the reverse proxy on the same host to forward to it. It is not intended to be directly exposed.
+   ```sh
+   cd local-auth
+   docker compose up -d --build
+   docker compose logs -f local-auth
+   ```
 
-## Required follow-up for full Signal operation
+3. The Compose file deliberately publishes the sidecar only on host loopback at `127.0.0.1:8090`; PostgreSQL is on an internal Docker network and is not published.
+4. Put a trusted LAN reverse proxy in front of the sidecar and expose it only over HTTPS. Use a certificate whose SAN matches the hostname configured in the app and Java server.
+5. Set `LOCAL_AUTH_ONLY=true`, `LOCAL_AUTH_INTERNAL_URL`, and `LOCAL_AUTH_INTERNAL_TOKEN` on the Java Signal Server. The Java server's internal URL must resolve from the server process/container and must validate the proxy certificate.
+6. Set `ALLOWED_ORIGINS` in the sidecar environment to the exact HTTPS origin hosting the dashboard, for example `https://dashboard.lan`. Do not use a wildcard origin.
+7. Import `server-config.json` into the Android app under **Settings → Local Server**. Set `localAuthOnly=true`, the HTTPS auth/API and module endpoints, and the PEM CA certificate in `trustedCaPem`.
+8. In the app, open **Settings → Local Server → Copy device enrollment information**. In the dashboard create the user's phone record and enroll that Android ID + public key. Only then can that device request a challenge.
 
-- Wire the Android app to generate and persist a P-256 Android Keystore key, call challenge/verify/complete, and pass the resulting registration ticket through the registration flow.
-- Wire the Java Signal server's `PhoneVerificationTokenManager` to validate/consume that ticket before creating a phone-number account.
-- Disable the SMS/voice verification routes when local-auth-only mode is enabled.
-- Retain Signal's ACI/PNI, identity-key and pre-key generation and account-creation logic.
-- Run Android builds, Maven tests, API integration tests and real multi-device LAN tests.
+Example reverse-proxy routing on the same host:
+- dashboard UI: `https://dashboard.lan/` → `http://127.0.0.1:8088/`
+- local-auth API: `https://dashboard.lan/v1/local-auth/` → `http://127.0.0.1:8090/v1/local-auth/`
 
+If the dashboard and auth API use different hostnames, set the dashboard's API base URL to the HTTPS auth hostname and add the exact dashboard origin to `ALLOWED_ORIGINS`.
+
+## Verification and build checks
+
+Run these checks from the repository root:
+
+```sh
+cd local-auth
+gofmt -w .
+go vet ./...
+go test ./...
+cd ..
+./mvnw -B -pl service -am -DskipTests -Dcheckstyle.skip -Dspotless.check.skip package
+```
+
+The full Maven suite is `./mvnw verify`. Android build/test tasks must also be run with the project's supported JDK/Android SDK. A successful compile is not a substitute for a real two-device LAN acceptance test.
+
+## Scope and remaining LAN infrastructure
+
+This repository still contains Signal's normal server components. The local authentication sidecar does not, by itself, replace every external subsystem used by the complete Signal deployment. A fully isolated installation must separately provide and configure local-compatible storage/database services, attachment/CDN hosting, TURN/SFU for calls, and a message wake-up strategy that does not depend on FCM/APNs. The app endpoint file exposes configuration slots for those modules; a URL is not proof that the corresponding local service has been deployed.
