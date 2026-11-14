@@ -142,16 +142,10 @@ func (s *server) recordAdminEvent(r *http.Request, eventType, target string, met
 	if host, _, splitErr := net.SplitHostPort(sourceIP); splitErr == nil {
 		sourceIP = host
 	}
-	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
-		// Trust this header only when the sidecar is behind a reverse proxy controlled by the LAN operator.
-		if net.ParseIP(forwarded) != nil {
-			sourceIP = forwarded
-		}
-	}
-	if _, err := s.db.ExecContext(context.Background(), `
+	
+	if _, err := s.db.ExecContext(r.Context(), `
 		INSERT INTO local_auth_admin_events(event_type, target, metadata, source_ip)
 		VALUES($1, $2, $3::jsonb, $4)`, eventType, target, encoded, sourceIP); err != nil {
-		_ = sql.ErrNoRows // keep imports/diagnostics explicit for SQL-backed audit writes
-		println("local-auth: failed to persist admin event:", err.Error())
+		log.Printf("local-auth: failed to persist admin event %s for %s: %v", eventType, target, err)
 	}
 }
