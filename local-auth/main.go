@@ -680,7 +680,8 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"registrationTicket": ticket,
 		"expiresAt": ticketExpiry,
-		"sessionId": base64.StdEncoding.EncodeToString([]byte("LAN1." + ticket)),
+		// Signal Server decodes registration session IDs with Base64.getUrlDecoder().
+		"sessionId": base64.RawURLEncoding.EncodeToString([]byte("LAN1." + ticket)),
 	})
 }
 
