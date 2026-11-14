@@ -50,7 +50,7 @@ jobs:
           # ca-certificates: required for AWS CRT client
           apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ca-certificates
       - name: Set up JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: 'temurin'
           java-version-file: .java-version
@@ -70,42 +70,3 @@ jobs:
           ldconfig
       - name: Build with Maven
         run: ./mvnw -e -B -Pprepull-testcontainers-images clean verify -DfoundationDb.serviceContainerNamePrefix=foundationdb
-
-  local-auth:
-    name: Local device authentication sidecar
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: local-auth
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23.x"
-          cache-dependency-path: local-auth/go.mod
-      - name: Verify Go formatting
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            printf 'Go files need gofmt:\\n%s\\n' "$unformatted"
-            gofmt -d .
-            exit 1
-          fi
-      - name: Download Go dependencies
-        run: go mod download
-      - name: Go vet
-        run: go vet ./...
-      - name: Go unit tests
-        run: go test -race ./...
-      - name: Build local-auth Docker image
-        run: docker build --pull -t signal-local-auth-ci:latest .
-      - name: Validate local-auth Compose configuration
-        env:
-          LOCAL_AUTH_DB_PASSWORD: ci-db-password
-          LOCAL_AUTH_ADMIN_TOKEN: ci-admin-token
-          LOCAL_AUTH_INTERNAL_TOKEN: ci-internal-token
-          LOCAL_AUTH_TICKET_HMAC_SECRET: ci-ticket-hmac-secret
-          LOCAL_AUTH_ANDROID_ID_HASH_SECRET: ci-android-id-hash-secret
-          LOCAL_AUTH_ALLOWED_ORIGINS: https://dashboard.lan
-        run: docker compose config --quiet

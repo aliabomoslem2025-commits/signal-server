@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.entities.PhoneVerificationRequest;
 import org.whispersystems.textsecuregcm.entities.RegistrationServiceSession;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.registration.RegistrationServiceClient;
 import org.whispersystems.textsecuregcm.spam.RegistrationRecoveryChecker;
 import org.whispersystems.textsecuregcm.storage.PhoneNumberIdentifiers;
@@ -33,19 +34,30 @@ public class PhoneVerificationTokenManager {
 
   private final PhoneNumberIdentifiers phoneNumberIdentifiers;
 
-  private final @Nullable RegistrationServiceClient registrationServiceClient;
+  @Nullable private final RegistrationServiceClient registrationServiceClient;
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
+  private final LocalDeviceAuthStore localDeviceAuthStore;
   private final Optional<LocalAuthTicketClient> localAuthTicketClient;
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
       @Nullable final RegistrationServiceClient registrationServiceClient,
       final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
       final RegistrationRecoveryChecker registrationRecoveryChecker) {
+    this(phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager,
+        registrationRecoveryChecker, null);
+  }
+
+  public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
+      final RegistrationServiceClient registrationServiceClient,
+      final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
+      final RegistrationRecoveryChecker registrationRecoveryChecker,
+      @Nullable final LocalDeviceAuthStore localDeviceAuthStore) {
     this.phoneNumberIdentifiers = phoneNumberIdentifiers;
     this.registrationServiceClient = registrationServiceClient;
     this.phoneNumberRecoveryPasswordsManager = phoneNumberRecoveryPasswordsManager;
     this.registrationRecoveryChecker = registrationRecoveryChecker;
+    this.localDeviceAuthStore = localDeviceAuthStore;
     this.localAuthTicketClient = LocalAuthTicketClient.fromEnvironment();
   }
 
@@ -79,9 +91,15 @@ public class PhoneVerificationTokenManager {
       throw new IllegalArgumentException("Exactly one of session ID or recovery password must non-null");
     }
 
-    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled() &&
-        (sessionId == null || !LocalAuthTicketClient.isLocalAuthSession(sessionId))) {
-      throw new InvalidRegistrationSessionException("SMS and phone-call verification are disabled; a LAN device-authentication ticket is required");
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      final boolean hasSidecarSession = LocalAuthTicketClient.isLocalAuthSession(sessionId);
+      final boolean hasNativeLocalSession = sessionId != null
+          && localDeviceAuthStore != null
+          && localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId);
+      if (!hasSidecarSession && !hasNativeLocalSession) {
+        throw new InvalidRegistrationSessionException(
+            "SMS and phone-call verification are disabled; a LAN device-authentication session is required");
+      }
     }
 
     final PhoneVerificationRequest.VerificationType verificationType = sessionId != null
@@ -89,15 +107,7 @@ public class PhoneVerificationTokenManager {
         : PhoneVerificationRequest.VerificationType.RECOVERY_PASSWORD;
 
     switch (verificationType) {
-      case SESSION -> {
-        if (LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
-          final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
-              () -> new InvalidRegistrationSessionException("LAN authentication is not enabled on this server"));
-          client.validate(number, sessionId);
-        } else {
-          verifyBySessionId(number, sessionId);
-        }
-      }
+      case SESSION -> verifyBySessionId(number, sessionId);
       case RECOVERY_PASSWORD -> verifyByRecoveryPassword(number, userAgent, acceptLanguage, mostRecentProxy, recoveryPassword);
     }
 
@@ -106,8 +116,29 @@ public class PhoneVerificationTokenManager {
 
   private void verifyBySessionId(final String number, final byte[] sessionId)
       throws UnverifiedRegistrationSessionException, InvalidRegistrationSessionException, IOException {
+    if (LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
+      final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
+          () -> new InvalidRegistrationSessionException("LAN sidecar authentication is not configured"));
+      try {
+        client.validate(number, sessionId);
+        return;
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("local authentication service interrupted", e);
+      }
+    }
+
+    if (localDeviceAuthStore != null) {
+      // In a local deployment, only sessions created and verified by the LAN device-auth flow are valid.
+      // Never fall back to the upstream registration service or its SMS/voice verification path.
+      if (localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId)) {
+        return;
+      }
+      throw new UnverifiedRegistrationSessionException();
+    }
+
     if (registrationServiceClient == null) {
-      throw new IOException("external registration verification is disabled on this server");
+      throw new UnverifiedRegistrationSessionException();
     }
 
     try {
@@ -136,8 +167,7 @@ public class PhoneVerificationTokenManager {
   }
 
   /**
-   * Consume the LAN ticket after all registration-lock and MFA checks, immediately before account creation.
-   * This prevents a replayed ticket from creating an account before the one-time redemption is rejected.
+   * Redeem a sidecar ticket immediately before account creation so a ticket cannot be replayed.
    */
   public void consumeLocalAuthSession(final String number, final byte[] sessionId)
       throws InterruptedException, InvalidRegistrationSessionException, IOException {
@@ -145,7 +175,7 @@ public class PhoneVerificationTokenManager {
       return;
     }
     final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
-        () -> new InvalidRegistrationSessionException("LAN authentication is not enabled on this server"));
+        () -> new InvalidRegistrationSessionException("LAN sidecar authentication is not configured"));
     client.consume(number, sessionId);
   }
 
