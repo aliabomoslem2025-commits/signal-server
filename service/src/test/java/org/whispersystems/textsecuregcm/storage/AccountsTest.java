@@ -2646,7 +2646,7 @@ class AccountsTest {
     for (final Device expectingDevice : expecting.getDevices()) {
       final Device resultDevice = result.getDevice(expectingDevice.getId()).orElseThrow();
       assertThat(resultDevice.getApnId()).isEqualTo(expectingDevice.getApnId());
-      assertThat(resultDevice.getGcmId()).isEqualTo(expectingDevice.getGcmId());
+      assertThat(resultDevice.getNtfyTopic()).isEqualTo(expectingDevice.getNtfyTopic());
       assertThat(resultDevice.getLastSeen()).isEqualTo(expectingDevice.getLastSeen());
       assertThat(resultDevice.getFetchesMessages()).isEqualTo(expectingDevice.getFetchesMessages());
       assertThat(resultDevice.getUserAgent()).isEqualTo(expectingDevice.getUserAgent());
