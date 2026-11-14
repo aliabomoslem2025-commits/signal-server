@@ -599,7 +599,6 @@ public class AccountCreationDeletionIntegrationTest {
         existingAccountBadges,
         Optional.empty(),
         Optional.empty(),
-        Optional.empty(),
         aciSignedPreKey,
         hasE164 ? Optional.of(pniSignedPreKey) : Optional.empty(),
         aciPqLastResortPreKey,
