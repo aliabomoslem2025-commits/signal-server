@@ -214,7 +214,6 @@ class DeviceControllerTest {
   void linkDeviceAtomic(final boolean withPhoneNumber,
     final boolean fetchesMessages,
     final Optional<ApnRegistrationId> apnRegistrationId,
-    final Optional<String> expectedApnsToken,
     final Optional<String> expectedApnsToken) throws LinkDeviceTokenAlreadyUsedException, DeviceLimitExceededException {
 
     final Device existingDevice = mock(Device.class);
