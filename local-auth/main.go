@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/rand"
@@ -20,13 +19,11 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"database/sql"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"database/sql"
 )
 
 //go:embed schema.sql
@@ -58,19 +55,9 @@ type userRequest struct {
 }
 
 type deviceRequest struct {
-	AndroidID    string `json:"androidId"`
+	AndroidID   string `json:"androidId"`
 	PublicKeyPEM string `json:"publicKeyPem"`
-	Label        string `json:"label"`
-}
-
-type userUpdateRequest struct {
-	Active      *bool   `json:"active"`
-	DisplayName *string `json:"displayName"`
-}
-
-type deviceUpdateRequest struct {
-	Active *bool   `json:"active"`
-	Label  *string `json:"label"`
+	Label       string `json:"label"`
 }
 
 type challengeRequest struct {
@@ -112,353 +99,7 @@ type consumeTicketResponse struct {
 	ExpiresAt     time.Time `json:"expiresAt"`
 }
 
-var (
-	phonePattern             = regexp.MustCompile(`^\+[1-9][0-9]{7,14}package main
-
-import (
-	"context"
-	"crypto/ecdsa"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	_ "embed"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
-	"errors"
-	"fmt"
-	"io"
-	"math/big"
-	"net/http"
-	"net/url"
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
-
-	"database/sql"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
-)
-
-//go:embed schema.sql
-var schema string
-
-type config struct {
-	listenAddr       string
-	databaseURL      string
-	adminToken       []byte
-	internalToken    []byte
-	ticketSecret     []byte
-	androidHashSecret []byte
-	allowedOrigins   map[string]bool
-	challengeTTL     time.Duration
-}
-
-type server struct {
-	db  *sql.DB
-	cfg config
-}
-
-type apiError struct {
-	Error string `json:"error"`
-}
-
-type userRequest struct {
-	Phone       string `json:"phone"`
-	DisplayName string `json:"displayName"`
-}
-
-type deviceRequest struct {
-	AndroidID    string `json:"androidId"`
-	PublicKeyPEM string `json:"publicKeyPem"`
-	Label        string `json:"label"`
-}
-
-type userUpdateRequest struct {
-	Active      *bool   `json:"active"`
-	DisplayName *string `json:"displayName"`
-}
-
-type deviceUpdateRequest struct {
-	Active *bool   `json:"active"`
-	Label  *string `json:"label"`
-}
-
-type challengeRequest struct {
-	Phone     string `json:"phone"`
-	AndroidID string `json:"androidId"`
-}
-
-type challengeResponse struct {
-	ChallengeID string    `json:"challengeId"`
-	Nonce       string    `json:"nonce"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-}
-
-type verifyRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Signature   string `json:"signature"`
-}
-
-type verifyResponse struct {
-	VerificationCode string    `json:"verificationCode"`
-	ExpiresAt        time.Time `json:"expiresAt"`
-}
-
-type completeRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Code        string `json:"code"`
-}
-
-type ticketClaims struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	JTI           string `json:"jti"`
-	ExpiresAt     int64  `json:"exp"`
-}
-
-type consumeTicketResponse struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-}
-
-)
-	challengeIDPattern       = regexp.MustCompile(`^[a-f0-9]{48}package main
-
-import (
-	"context"
-	"crypto/ecdsa"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	_ "embed"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
-	"errors"
-	"fmt"
-	"io"
-	"math/big"
-	"net/http"
-	"net/url"
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
-
-	"database/sql"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
-)
-
-//go:embed schema.sql
-var schema string
-
-type config struct {
-	listenAddr       string
-	databaseURL      string
-	adminToken       []byte
-	internalToken    []byte
-	ticketSecret     []byte
-	androidHashSecret []byte
-	allowedOrigins   map[string]bool
-	challengeTTL     time.Duration
-}
-
-type server struct {
-	db  *sql.DB
-	cfg config
-}
-
-type apiError struct {
-	Error string `json:"error"`
-}
-
-type userRequest struct {
-	Phone       string `json:"phone"`
-	DisplayName string `json:"displayName"`
-}
-
-type deviceRequest struct {
-	AndroidID    string `json:"androidId"`
-	PublicKeyPEM string `json:"publicKeyPem"`
-	Label        string `json:"label"`
-}
-
-type userUpdateRequest struct {
-	Active      *bool   `json:"active"`
-	DisplayName *string `json:"displayName"`
-}
-
-type deviceUpdateRequest struct {
-	Active *bool   `json:"active"`
-	Label  *string `json:"label"`
-}
-
-type challengeRequest struct {
-	Phone     string `json:"phone"`
-	AndroidID string `json:"androidId"`
-}
-
-type challengeResponse struct {
-	ChallengeID string    `json:"challengeId"`
-	Nonce       string    `json:"nonce"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-}
-
-type verifyRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Signature   string `json:"signature"`
-}
-
-type verifyResponse struct {
-	VerificationCode string    `json:"verificationCode"`
-	ExpiresAt        time.Time `json:"expiresAt"`
-}
-
-type completeRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Code        string `json:"code"`
-}
-
-type ticketClaims struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	JTI           string `json:"jti"`
-	ExpiresAt     int64  `json:"exp"`
-}
-
-type consumeTicketResponse struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-}
-
-)
-	verificationCodePattern = regexp.MustCompile(`^[0-9]{6}package main
-
-import (
-	"context"
-	"crypto/ecdsa"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	_ "embed"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
-	"errors"
-	"fmt"
-	"io"
-	"math/big"
-	"net/http"
-	"net/url"
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
-
-	"database/sql"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
-)
-
-//go:embed schema.sql
-var schema string
-
-type config struct {
-	listenAddr       string
-	databaseURL      string
-	adminToken       []byte
-	internalToken    []byte
-	ticketSecret     []byte
-	androidHashSecret []byte
-	allowedOrigins   map[string]bool
-	challengeTTL     time.Duration
-}
-
-type server struct {
-	db  *sql.DB
-	cfg config
-}
-
-type apiError struct {
-	Error string `json:"error"`
-}
-
-type userRequest struct {
-	Phone       string `json:"phone"`
-	DisplayName string `json:"displayName"`
-}
-
-type deviceRequest struct {
-	AndroidID    string `json:"androidId"`
-	PublicKeyPEM string `json:"publicKeyPem"`
-	Label        string `json:"label"`
-}
-
-type userUpdateRequest struct {
-	Active      *bool   `json:"active"`
-	DisplayName *string `json:"displayName"`
-}
-
-type deviceUpdateRequest struct {
-	Active *bool   `json:"active"`
-	Label  *string `json:"label"`
-}
-
-type challengeRequest struct {
-	Phone     string `json:"phone"`
-	AndroidID string `json:"androidId"`
-}
-
-type challengeResponse struct {
-	ChallengeID string    `json:"challengeId"`
-	Nonce       string    `json:"nonce"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-}
-
-type verifyRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Signature   string `json:"signature"`
-}
-
-type verifyResponse struct {
-	VerificationCode string    `json:"verificationCode"`
-	ExpiresAt        time.Time `json:"expiresAt"`
-}
-
-type completeRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Code        string `json:"code"`
-}
-
-type ticketClaims struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	JTI           string `json:"jti"`
-	ExpiresAt     int64  `json:"exp"`
-}
-
-type consumeTicketResponse struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-}
-
-)
-)
+var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 
 func main() {
 	cfg, err := loadConfig()
@@ -487,7 +128,6 @@ func main() {
 	}
 
 	s := &server{db: db, cfg: cfg}
-	go s.cleanupExpiredRecords()
 	httpServer := &http.Server{
 		Addr:              cfg.listenAddr,
 		Handler:           s.routes(),
@@ -576,7 +216,6 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/v1/local-auth/complete", s.handleComplete)
 	mux.HandleFunc("/v1/local-auth/internal/validate-ticket", s.requireBearer(s.cfg.internalToken, s.handleValidateTicket))
 	mux.HandleFunc("/v1/local-auth/internal/consume-ticket", s.requireBearer(s.cfg.internalToken, s.handleConsumeTicket))
-	mux.HandleFunc("/v1/local-auth/admin/audit", s.requireBearer(s.cfg.adminToken, s.handleAudit))
 	mux.HandleFunc("/v1/local-auth/admin/users", s.requireBearer(s.cfg.adminToken, s.handleUsers))
 	mux.HandleFunc("/v1/local-auth/admin/users/", s.requireBearer(s.cfg.adminToken, s.handleUserSubresource))
 	mux.HandleFunc("/v1/local-auth/admin/devices/", s.requireBearer(s.cfg.adminToken, s.handleDevice))
@@ -589,7 +228,7 @@ func (s *server) routes() http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -637,17 +276,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 func (s *server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		limit := parseBoundedInt(r.URL.Query().Get("limit"), 50, 1, 200)
-		offset := parseBoundedInt(r.URL.Query().Get("offset"), 0, 0, 1000000)
-		query := strings.TrimSpace(r.URL.Query().Get("q"))
-		search := "%" + query + "%"
 		rows, err := s.db.QueryContext(r.Context(), `
 			SELECT u.phone, u.display_name, u.active, u.created_at,
 			       COUNT(d.id) FILTER (WHERE d.active = TRUE)
 			FROM local_auth_users u
 			LEFT JOIN local_auth_devices d ON d.phone = u.phone
-			WHERE ($1 = '' OR u.phone ILIKE $2 OR u.display_name ILIKE $2)
-			GROUP BY u.phone ORDER BY u.phone LIMIT $3 OFFSET $4`, query, search, limit, offset)
+			GROUP BY u.phone ORDER BY u.phone`)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list users")
 			return
@@ -663,20 +297,16 @@ func (s *server) handleUsers(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "could not read users")
 				return
 			}
-			users = append(users, map[string]any{"phone": phone, "displayName": displayName, "active": active, "createdAt": createdAt, "activeDevices": deviceCount})
+			users = append(users, map[string]any{
+				"phone": phone, "displayName": displayName, "active": active,
+				"createdAt": createdAt, "activeDevices": deviceCount,
+			})
 		}
 		if err := rows.Err(); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read users")
 			return
 		}
-		var total int
-		if err := s.db.QueryRowContext(r.Context(), `
-			SELECT COUNT(*) FROM local_auth_users
-			WHERE ($1 = '' OR phone ILIKE $2 OR display_name ILIKE $2)`, query, search).Scan(&total); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not count users")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"users": users, "total": total, "limit": limit, "offset": offset})
+		writeJSON(w, http.StatusOK, map[string]any{"users": users})
 	case http.MethodPost:
 		var request userRequest
 		if !decodeJSON(w, r, &request) {
@@ -691,12 +321,12 @@ func (s *server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		_, err := s.db.ExecContext(r.Context(), `
 			INSERT INTO local_auth_users(phone, display_name, active)
 			VALUES($1, $2, TRUE)
-			ON CONFLICT(phone) DO UPDATE SET display_name = EXCLUDED.display_name, active = TRUE, updated_at = NOW()`, request.Phone, request.DisplayName)
+			ON CONFLICT(phone) DO UPDATE SET display_name = EXCLUDED.display_name,
+				active = TRUE, updated_at = NOW()`, request.Phone, request.DisplayName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not save user")
 			return
 		}
-		s.recordAudit(r.Context(), "admin", "user.saved", request.Phone, map[string]any{"displayName": request.DisplayName})
 		writeJSON(w, http.StatusCreated, map[string]string{"phone": request.Phone})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -706,68 +336,24 @@ func (s *server) handleUsers(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 	relative := strings.TrimPrefix(r.URL.Path, "/v1/local-auth/admin/users/")
 	parts := strings.Split(strings.Trim(relative, "/"), "/")
-	if len(parts) == 1 {
+	if len(parts) == 1 && r.Method == http.MethodDelete {
 		phone, err := urlPathUnescape(parts[0])
 		if err != nil || !phonePattern.MatchString(phone) {
 			writeError(w, http.StatusBadRequest, "invalid phone")
 			return
 		}
-		if r.Method == http.MethodDelete {
-			result, err := s.db.ExecContext(r.Context(), "UPDATE local_auth_users SET active = FALSE, updated_at = NOW() WHERE phone = $1", phone)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "could not deactivate user")
-				return
-		}
-			count, _ := result.RowsAffected()
-			if count == 0 {
-				writeError(w, http.StatusNotFound, "user not found")
-				return
-		}
-			_, _ = s.db.ExecContext(r.Context(), "UPDATE local_auth_devices SET active = FALSE WHERE phone = $1", phone)
-			s.recordAudit(r.Context(), "admin", "user.deactivated", phone, nil)
-			w.WriteHeader(http.StatusNoContent)
+		result, err := s.db.ExecContext(r.Context(), "DELETE FROM local_auth_users WHERE phone = $1", phone)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete user")
 			return
 		}
-		if r.Method == http.MethodPatch {
-			var request userUpdateRequest
-			if !decodeJSON(w, r, &request) {
-				return
-		}
-			if request.Active == nil && request.DisplayName == nil {
-				writeError(w, http.StatusBadRequest, "at least one of active or displayName is required")
-				return
-		}
-			var activeValue any
-			var displayNameValue any
-			if request.Active != nil {
-				activeValue = *request.Active
-			}
-			if request.DisplayName != nil {
-				if len(strings.TrimSpace(*request.DisplayName)) > 120 {
-					writeError(w, http.StatusBadRequest, "displayName must be at most 120 characters")
-					return
-				}
-				displayNameValue = strings.TrimSpace(*request.DisplayName)
-			}
-			result, err := s.db.ExecContext(r.Context(), `
-				UPDATE local_auth_users SET active = COALESCE($2, active), display_name = COALESCE($3, display_name), updated_at = NOW()
-				WHERE phone = $1`, phone, activeValue, displayNameValue)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "could not update user")
-				return
-		}
-			count, _ := result.RowsAffected()
-			if count == 0 {
-				writeError(w, http.StatusNotFound, "user not found")
-				return
-		}
-			if request.Active != nil && !*request.Active {
-				_, _ = s.db.ExecContext(r.Context(), "UPDATE local_auth_devices SET active = FALSE WHERE phone = $1", phone)
-			}
-			s.recordAudit(r.Context(), "admin", "user.updated", phone, map[string]any{"active": request.Active, "displayNameChanged": request.DisplayName != nil})
-			w.WriteHeader(http.StatusNoContent)
+		count, _ := result.RowsAffected()
+		if count == 0 {
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	if len(parts) == 2 && parts[1] == "devices" {
 		phone, err := urlPathUnescape(parts[0])
@@ -777,11 +363,12 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Method == http.MethodGet {
 			rows, err := s.db.QueryContext(r.Context(), `
-				SELECT id, label, active, created_at, last_seen_at FROM local_auth_devices WHERE phone = $1 ORDER BY created_at DESC`, phone)
+				SELECT id, label, active, created_at, last_seen_at
+				FROM local_auth_devices WHERE phone = $1 ORDER BY created_at DESC`, phone)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "could not list devices")
 				return
-		}
+			}
 			defer rows.Close()
 			devices := make([]map[string]any, 0)
 			for rows.Next() {
@@ -797,12 +384,15 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 				if lastSeen.Valid {
 					lastSeenValue = lastSeen.Time
 				}
-				devices = append(devices, map[string]any{"id": id, "label": label, "active": active, "createdAt": createdAt, "lastSeenAt": lastSeenValue})
+				devices = append(devices, map[string]any{
+					"id": id, "label": label, "active": active,
+					"createdAt": createdAt, "lastSeenAt": lastSeenValue,
+				})
 			}
 			if err := rows.Err(); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not read devices")
 				return
-		}
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
 			return
 		}
@@ -810,17 +400,17 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 			var request deviceRequest
 			if !decodeJSON(w, r, &request) {
 				return
-		}
+			}
 			request.AndroidID = strings.TrimSpace(request.AndroidID)
 			request.Label = strings.TrimSpace(request.Label)
 			if len(request.AndroidID) < 4 || len(request.AndroidID) > 256 || len(request.Label) > 120 {
 				writeError(w, http.StatusBadRequest, "invalid Android ID or label")
 				return
-		}
+			}
 			if _, err := parsePublicKey(request.PublicKeyPEM); err != nil {
 				writeError(w, http.StatusBadRequest, "publicKeyPem must be a valid ECDSA P-256 SubjectPublicKeyInfo PEM")
 				return
-		}
+			}
 			var active bool
 			if err := s.db.QueryRowContext(r.Context(), "SELECT active FROM local_auth_users WHERE phone = $1", phone).Scan(&active); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -841,14 +431,16 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			idHash := s.hashAndroidID(request.AndroidID)
 			err = s.db.QueryRowContext(r.Context(), `
-				INSERT INTO local_auth_devices(id, phone, android_id_hash, public_key_pem, label, active) VALUES($1, $2, $3, $4, $5, TRUE)
-				ON CONFLICT(phone, android_id_hash) DO UPDATE SET public_key_pem = EXCLUDED.public_key_pem, label = EXCLUDED.label, active = TRUE
+				INSERT INTO local_auth_devices(id, phone, android_id_hash, public_key_pem, label, active)
+				VALUES($1, $2, $3, $4, $5, TRUE)
+				ON CONFLICT(phone, android_id_hash) DO UPDATE SET
+					public_key_pem = EXCLUDED.public_key_pem, label = EXCLUDED.label,
+					active = TRUE
 				RETURNING id`, deviceID, phone, idHash, strings.TrimSpace(request.PublicKeyPEM), request.Label).Scan(&deviceID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "could not enroll device")
 				return
 			}
-			s.recordAudit(r.Context(), "admin", "device.enrolled", phone, map[string]any{"deviceId": deviceID, "label": request.Label})
 			writeJSON(w, http.StatusCreated, map[string]string{"deviceId": deviceID})
 			return
 		}
@@ -857,48 +449,13 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDevice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
 	id, err := urlPathUnescape(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/local-auth/admin/devices/"), "/"))
 	if err != nil || id == "" {
 		writeError(w, http.StatusBadRequest, "invalid device id")
-		return
-	}
-	if r.Method == http.MethodPatch {
-		var request deviceUpdateRequest
-		if !decodeJSON(w, r, &request) {
-			return
-		}
-		if request.Active == nil && request.Label == nil {
-			writeError(w, http.StatusBadRequest, "at least one of active or label is required")
-			return
-		}
-		var activeValue any
-		var labelValue any
-		if request.Active != nil {
-			activeValue = *request.Active
-		}
-		if request.Label != nil {
-			if len(strings.TrimSpace(*request.Label)) > 120 {
-				writeError(w, http.StatusBadRequest, "label must be at most 120 characters")
-				return
-			}
-			labelValue = strings.TrimSpace(*request.Label)
-		}
-		var phone string
-		err := s.db.QueryRowContext(r.Context(), `UPDATE local_auth_devices SET active = COALESCE($2, active), label = COALESCE($3, label) WHERE id = $1 RETURNING phone`, id, activeValue, labelValue).Scan(&phone)
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "device not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not update device")
-			return
-		}
-		s.recordAudit(r.Context(), "admin", "device.updated", phone, map[string]any{"deviceId": id, "active": request.Active, "labelChanged": request.Label != nil})
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	result, err := s.db.ExecContext(r.Context(), "UPDATE local_auth_devices SET active = FALSE WHERE id = $1 AND active = TRUE", id)
@@ -911,9 +468,6 @@ func (s *server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "active device not found")
 		return
 	}
-	var phone string
-	_ = s.db.QueryRowContext(r.Context(), "SELECT phone FROM local_auth_devices WHERE id = $1", id).Scan(&phone)
-	s.recordAudit(r.Context(), "admin", "device.revoked", phone, map[string]any{"deviceId": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -973,7 +527,6 @@ func (s *server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not save challenge")
 		return
 	}
-	s.recordAudit(r.Context(), "device", "auth.challenge.created", request.Phone, map[string]any{"challengeId": id})
 	writeJSON(w, http.StatusOK, challengeResponse{
 		ChallengeID: id,
 		Nonce: base64.RawURLEncoding.EncodeToString(nonce),
@@ -988,10 +541,6 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	var request verifyRequest
 	if !decodeJSON(w, r, &request) {
-		return
-	}
-	if !challengeIDPattern.MatchString(request.ChallengeID) {
-		writeError(w, http.StatusBadRequest, "invalid challenge ID")
 		return
 	}
 	signature, err := base64.StdEncoding.DecodeString(request.Signature)
@@ -1030,7 +579,6 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	digest := sha256.Sum256(message)
 	if !ecdsa.VerifyASN1(publicKey, digest[:], signature) {
 		_, _ = s.db.ExecContext(r.Context(), "UPDATE local_auth_challenges SET attempts = attempts + 1 WHERE id = $1", request.ChallengeID)
-		s.recordAudit(r.Context(), "device", "auth.device-proof.failed", phone, map[string]any{"challengeId": request.ChallengeID})
 		writeError(w, http.StatusUnauthorized, "device proof is invalid")
 		return
 	}
@@ -1053,11 +601,7 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "challenge has already been used")
 		return
 	}
-	if _, err := s.db.ExecContext(r.Context(), "UPDATE local_auth_devices SET last_seen_at = NOW() WHERE phone = $1 AND android_id_hash = $2", phone, idHash); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not update device activity")
-		return
-	}
-	s.recordAudit(r.Context(), "device", "auth.device-proof.succeeded", phone, map[string]any{"challengeId": request.ChallengeID})
+	_, _ = s.db.ExecContext(r.Context(), "UPDATE local_auth_devices SET last_seen_at = NOW() WHERE phone = $1 AND android_id_hash = $2", phone, idHash)
 	writeJSON(w, http.StatusOK, verifyResponse{VerificationCode: code, ExpiresAt: expires})
 }
 
@@ -1068,10 +612,6 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	var request completeRequest
 	if !decodeJSON(w, r, &request) {
-		return
-	}
-	if !challengeIDPattern.MatchString(request.ChallengeID) || !verificationCodePattern.MatchString(request.Code) {
-		writeError(w, http.StatusBadRequest, "challengeId or verification code format is invalid")
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
@@ -1137,7 +677,6 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not complete verification")
 		return
 	}
-	s.recordAudit(r.Context(), "device", "auth.registration-ticket.issued", phone, map[string]any{"ticketId": jti})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"registrationTicket": ticket,
 		"expiresAt": ticketExpiry,
@@ -1228,81 +767,9 @@ func (s *server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not redeem ticket")
 		return
 	}
-	s.recordAudit(r.Context(), "signal-server", "auth.registration-ticket.consumed", phone, map[string]any{"ticketId": claims.JTI})
 	writeJSON(w, http.StatusOK, consumeTicketResponse{
 		Phone: phone, AndroidIDHash: hex.EncodeToString(idHash), ExpiresAt: expires,
 	})
-}
-
-func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	limit := parseBoundedInt(r.URL.Query().Get("limit"), 50, 1, 200)
-	offset := parseBoundedInt(r.URL.Query().Get("offset"), 0, 0, 1000000)
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id, actor, action, subject, details, created_at FROM local_auth_audit_events ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list audit events")
-		return
-	}
-	defer rows.Close()
-	events := make([]map[string]any, 0)
-	for rows.Next() {
-		var id int64
-		var actor, action, subject string
-		var details json.RawMessage
-		var createdAt time.Time
-		if err := rows.Scan(&id, &actor, &action, &subject, &details, &createdAt); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not read audit events")
-			return
-		}
-		events = append(events, map[string]any{"id": id, "actor": actor, "action": action, "subject": subject, "details": details, "createdAt": createdAt})
-	}
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read audit events")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": events, "limit": limit, "offset": offset})
-}
-
-func (s *server) recordAudit(ctx context.Context, actor, action, subject string, details map[string]any) {
-	if details == nil {
-		details = map[string]any{}
-	}
-	payload, err := json.Marshal(details)
-	if err != nil {
-		payload = []byte("{}")
-	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO local_auth_audit_events(actor, action, subject, details) VALUES($1, $2, $3, $4::jsonb)`, actor, action, subject, string(payload)); err != nil {
-		fmt.Fprintln(os.Stderr, "could not write local-auth audit event:", err)
-	}
-}
-
-func parseBoundedInt(raw string, fallback, minimum, maximum int) int {
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value < minimum || value > maximum {
-		return fallback
-	}
-	return value
-}
-
-func (s *server) cleanupExpiredRecords() {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM local_auth_challenges WHERE expires_at < NOW() - INTERVAL '1 day'`); err != nil {
-			fmt.Fprintln(os.Stderr, "could not clean expired local-auth challenges:", err)
-		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM local_auth_tickets WHERE expires_at < NOW() - INTERVAL '1 day'`); err != nil {
-			fmt.Fprintln(os.Stderr, "could not clean expired local-auth tickets:", err)
-		}
-		cancel()
-	}
 }
 
 func (s *server) hashAndroidID(value string) []byte {
@@ -1345,11 +812,8 @@ func (s *server) verifyTicket(ticket string) (ticketClaims, error) {
 	if err != nil || json.Unmarshal(payload, &claims) != nil {
 		return claims, errors.New("invalid ticket payload")
 	}
-	if claims.Phone == "" || claims.JTI == "" || len(claims.AndroidIDHash) != sha256.Size*2 || claims.ExpiresAt <= time.Now().UTC().Unix() {
-		return claims, errors.New("expired or malformed ticket")
-	}
-	if _, err := hex.DecodeString(claims.AndroidIDHash); err != nil {
-		return claims, errors.New("malformed ticket device hash")
+	if claims.Phone == "" || claims.JTI == "" || claims.ExpiresAt <= time.Now().UTC().Unix() {
+		return claims, errors.New("expired ticket")
 	}
 	return claims, nil
 }
