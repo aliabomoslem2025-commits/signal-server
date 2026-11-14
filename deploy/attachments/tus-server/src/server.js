@@ -79,22 +79,25 @@ async function sha256Base64(filePath) {
   return hash.digest('base64');
 }
 
-async function publishToObjectStore(bucket, upload) {
+async function publishToObjectStore(bucket, datastore, upload, request = null) {
   if (!upload.storage?.path || !Number.isSafeInteger(upload.size) || upload.offset !== upload.size) return false;
   const filePath = upload.storage.path;
   const key = parsedFilename(upload);
   const checksum = await sha256Base64(filePath);
-  const objectMetadata = { 'signal-checksum-sha256': checksum };
+  const expected = request?.headers?.get?.('x-signal-checksum-sha256');
+  if (expected && expected !== checksum) {
+    throw Object.assign(new Error('SHA-256 checksum mismatch'), { status_code: 460 });
+  }
   await s3.send(new PutObjectCommand({
     Bucket: bucket,
     Key: key,
     Body: createReadStream(filePath),
     ContentLength: upload.size,
     ContentType: 'application/octet-stream',
-    Metadata: objectMetadata
+    Metadata: { 'signal-checksum-sha256': checksum }
   }));
-  // The object is durable in MinIO now; remove the local staging file and metadata.
-  await upload.datastore?.remove?.(upload.id).catch(() => {});
+  // Remove the local staging file only after the durable object-store write succeeded.
+  await datastore.remove(upload.id);
   return true;
 }
 
@@ -138,7 +141,7 @@ function makeTusServer(bucketName, routePath) {
       // Uploads are staged locally first and copied to MinIO. A transient MinIO outage must not
       // discard an already completed TUS stream; the retry loop below republishes completed items.
       try {
-        await publishToObjectStore(bucketName, upload);
+        await publishToObjectStore(bucketName, datastore, upload, _req);
       } catch (error) {
         console.error(JSON.stringify({ event: 'tus_publish_deferred', bucket: bucketName, uploadId: upload.id, message: error.message }));
       }
@@ -169,7 +172,7 @@ async function retryCompletedUploads() {
         } catch (error) {
           if (error?.$metadata?.httpStatusCode !== 404 && error?.name !== 'NotFound') throw error;
         }
-        await publishToObjectStore(bucket, upload);
+        await publishToObjectStore(bucket, state.datastore, upload);
       }
     } catch (error) {
       console.error(JSON.stringify({ event: 'tus_retry_scan_failed', bucket, message: error.message }));
