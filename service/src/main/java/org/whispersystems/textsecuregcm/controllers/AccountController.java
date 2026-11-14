@@ -102,7 +102,7 @@ public class AccountController {
    * The topic is a bearer capability: it is returned only to this device and must not be logged.
    */
   @PUT
-  @Path("/ntfy/")
+  @Path("/ntfy")
   @Produces(MediaType.APPLICATION_JSON)
   @ManagedAsync
   public NtfyRegistrationResponse registerNtfyTopic(@Auth AuthenticatedDevice auth) {
@@ -125,7 +125,7 @@ public class AccountController {
   }
 
   @DELETE
-  @Path("/ntfy/")
+  @Path("/ntfy")
   @ManagedAsync
   public void revokeNtfyTopic(@Auth AuthenticatedDevice auth) {
     accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), device -> device.setNtfyTopic(null));
