@@ -133,11 +133,11 @@ func (s *server) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 			metadata = []byte("{}")
 		}
 		events = append(events, map[string]any{
-			"id": id,
+			"id":        id,
 			"eventType": eventType,
-			"target": target,
-			"metadata": json.RawMessage(metadata),
-			"sourceIp": sourceIP,
+			"target":    target,
+			"metadata":  json.RawMessage(metadata),
+			"sourceIp":  sourceIP,
 			"createdAt": createdAt,
 		})
 	}
