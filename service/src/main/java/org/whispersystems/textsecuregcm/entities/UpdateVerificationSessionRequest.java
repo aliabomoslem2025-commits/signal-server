@@ -31,14 +31,12 @@ public record UpdateVerificationSessionRequest(
   public enum PushTokenType {
     @JsonProperty("apn")
     APN,
-    @JsonProperty("fcm")
-    FCM;
+    ;
 
     public PushNotification.TokenType toTokenType() {
       return switch (this) {
 
         case APN -> PushNotification.TokenType.APN;
-        case FCM -> PushNotification.TokenType.FCM;
       };
     }
   }
