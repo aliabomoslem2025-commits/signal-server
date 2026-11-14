@@ -94,6 +94,8 @@ import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.CertificateGenerator;
 import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.LocalTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.TurnCredentialsProvider;
 import org.whispersystems.textsecuregcm.auth.DisconnectionRequestManager;
 import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentialsGenerator;
 import org.whispersystems.textsecuregcm.auth.IdlePrimaryDeviceAuthenticatedWebSocketUpgradeFilter;
@@ -860,22 +862,28 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     final MessageSender messageSender = new MessageSender(messagesManager, pushNotificationManager, dynamicConfigurationManager);
     final ReceiptSender receiptSender = new ReceiptSender(accountsManager, messageSender, receiptSenderExecutor);
-    final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager = new CloudflareTurnCredentialsManager(
-        config.getTurnConfiguration().cloudflare().apiToken().value(),
-        config.getTurnConfiguration().cloudflare().endpoint(),
-        config.getTurnConfiguration().cloudflare().requestedCredentialTtl(),
-        config.getTurnConfiguration().cloudflare().clientCredentialTtl(),
-        config.getTurnConfiguration().cloudflare().urls(),
-        config.getTurnConfiguration().cloudflare().urlsWithIps(),
-        config.getTurnConfiguration().cloudflare().hostname(),
-        config.getTurnConfiguration().cloudflare().numHttpClients(),
-        config.getTurnConfiguration().cloudflare().circuitBreakerConfigurationName(),
-        cloudflareTurnHttpExecutor,
-        config.getTurnConfiguration().cloudflare().retryConfigurationName(),
-        cloudflareTurnRetryExecutor,
-        cloudflareDnsResolver,
-        dynamicConfigurationManager,
-        experimentEnrollmentManager);
+    final TurnCredentialsProvider turnCredentialsProvider;
+    if (config.getTurnConfiguration().local() != null) {
+      turnCredentialsProvider = new LocalTurnCredentialsManager(config.getTurnConfiguration().local(), clock);
+    } else {
+      final var cloudflareConfiguration = config.getTurnConfiguration().cloudflare();
+      turnCredentialsProvider = new CloudflareTurnCredentialsManager(
+          cloudflareConfiguration.apiToken().value(),
+          cloudflareConfiguration.endpoint(),
+          cloudflareConfiguration.requestedCredentialTtl(),
+          cloudflareConfiguration.clientCredentialTtl(),
+          cloudflareConfiguration.urls(),
+          cloudflareConfiguration.urlsWithIps(),
+          cloudflareConfiguration.hostname(),
+          cloudflareConfiguration.numHttpClients(),
+          cloudflareConfiguration.circuitBreakerConfigurationName(),
+          cloudflareTurnHttpExecutor,
+          cloudflareConfiguration.retryConfigurationName(),
+          cloudflareTurnRetryExecutor,
+          cloudflareDnsResolver,
+          dynamicConfigurationManager,
+          experimentEnrollmentManager);
+    }
 
     final CardinalityEstimator messageByteLimitCardinalityEstimator = new CardinalityEstimator(
         rateLimitersCluster,
@@ -1306,7 +1314,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         new AttachmentControllerV4(rateLimiters, gcsAttachmentGenerator, tusAttachmentGenerator,
             experimentEnrollmentManager, config.getAttachments().maxAttachmentUploadSizeInBytes()),
         new ArchiveController(accountsManager, backupAuthManager, backupManager, backupMetrics, config.getAttachments().maxAttachmentUploadSizeInBytes(), config.getAttachments().maxMessageBackupUploadSizeInBytes()),
-        new CallRoutingControllerV2(rateLimiters, cloudflareTurnCredentialsManager),
+        new CallRoutingControllerV2(rateLimiters, turnCredentialsProvider),
         new CallLinkController(rateLimiters, callingGenericZkSecretParams, callingPreV101GenericZkSecretParams),
         new CallQualitySurveyController(callQualitySurveyManager),
         new CertificateController(accountsManager, certificateGenerator, zkAuthOperations, callingGenericZkSecretParams, callingPreV101GenericZkSecretParams, clock),
