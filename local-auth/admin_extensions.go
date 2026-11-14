@@ -165,6 +165,6 @@ func (s *server) recordAdminEvent(r *http.Request, eventType, target string, met
 	if _, err := s.db.ExecContext(r.Context(), `
 		INSERT INTO local_auth_admin_events(event_type, target, metadata, source_ip)
 		VALUES($1, $2, $3::jsonb, $4)`, eventType, target, string(encoded), sourceIP); err != nil {
-		log.Printf("local-auth: failed to persist admin event %s for %s: %v", eventType, target, err)
+		log.Printf("local-auth: failed to persist admin event %s: %v", eventType, err)
 	}
 }
