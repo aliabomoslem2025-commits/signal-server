@@ -71,7 +71,7 @@ public class PushNotificationManager {
     final Pair<String, PushNotification.TokenType> tokenAndType = getToken(device);
 
     return sendNotification(new PushNotification(tokenAndType.first(), tokenAndType.second(),
-        PushNotification.NotificationType.RATE_LIMIT_CHALLENGE, challengeToken, destination, device, true, null))
+        PushNotification.NotificationType.RATE_LIMIT_CHALLENGE, challengeToken, destination, device, true, Duration.ofMinutes(5)))
         .thenApply(maybeResponse -> maybeResponse.orElseThrow(() -> new AssertionError("Responses must be present for urgent notifications")));
   }
 
