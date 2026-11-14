@@ -113,6 +113,6 @@ This repository still contains Signal's normal server components. The local auth
 The dashboard administrator API also supports these routes:
 
 - `PATCH /v1/local-auth/admin/user-status/{phone}` with `{"active":false}` to suspend a user or `{"active":true}` to re-enable them. Suspending a user consumes all outstanding local registration tickets so re-enabling cannot revive a previously issued ticket. Device enrollments are preserved.
-- `GET /v1/local-auth/admin/events?limit=50` to view the newest administrative changes. The limit is restricted to 1–100. Events include user creation/deletion, user enable/disable, device enrollment/revocation, timestamp, source address, and non-secret metadata.
+- `GET /v1/local-auth/admin/events?limit=50` to view the newest administrative changes. The limit is restricted to 1–100. Events include user creation/deletion, user enable/disable, device enrollment/revocation, timestamp, the connection peer address (which may be the reverse proxy), and non-secret metadata.
 
 The audit log is not an immutable external compliance ledger. Protect the PostgreSQL volume and backups with the same controls as the authentication database.
