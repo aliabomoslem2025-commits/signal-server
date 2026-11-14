@@ -47,7 +47,7 @@ public class PushNotificationScheduler implements Managed {
   private static final Logger logger = LoggerFactory.getLogger(PushNotificationScheduler.class);
 
   private static final String PENDING_BACKGROUND_APN_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_APN";
-  private static final String PENDING_BACKGROUND_NTFY_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_FCM";
+  private static final String PENDING_BACKGROUND_NTFY_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_NTFY";
   private static final String LAST_BACKGROUND_NOTIFICATION_TIMESTAMP_KEY_PREFIX = "LAST_BACKGROUND_NOTIFICATION";
   private static final String PENDING_DELAYED_NOTIFICATIONS_KEY_PREFIX = "DELAYED";
 
@@ -118,7 +118,7 @@ public class PushNotificationScheduler implements Managed {
           connection.sync().incr(NEXT_SLOT_TO_PROCESS_KEY)) % SlotHash.SLOT_COUNT);
 
       return processScheduledBackgroundNotifications(PushNotification.TokenType.APN, slot)
-          + processScheduledBackgroundNotifications(PushNotification.TokenType.FCM, slot)
+          + processScheduledBackgroundNotifications(PushNotification.TokenType.NTFY, slot)
           + processScheduledDelayedNotifications(slot);
     }
 
@@ -258,7 +258,7 @@ public class PushNotificationScheduler implements Managed {
    */
   public CompletionStage<Void> cancelScheduledNotifications(Account account, Device device) {
     return CompletableFuture.allOf(
-        cancelBackgroundNotifications(PushNotification.TokenType.FCM, account, device),
+        cancelBackgroundNotifications(PushNotification.TokenType.NTFY, account, device),
         cancelBackgroundNotifications(PushNotification.TokenType.APN, account, device),
         cancelDelayedNotifications(account, device));
   }
@@ -306,7 +306,7 @@ public class PushNotificationScheduler implements Managed {
     }
 
     final PushNotificationSender sender = switch (tokenType) {
-      case FCM -> ntfySender;
+      case NTFY -> ntfySender;
       case APN -> apnSender;
     };
 
@@ -332,7 +332,7 @@ public class PushNotificationScheduler implements Managed {
 
     final PushNotification pushNotification = new PushNotification(
         isApnsDevice ? device.getApnId() : device.getGcmId(),
-        isApnsDevice ? PushNotification.TokenType.APN : PushNotification.TokenType.FCM,
+        isApnsDevice ? PushNotification.TokenType.APN : PushNotification.TokenType.NTFY,
         PushNotification.NotificationType.NOTIFICATION,
         null,
         account,
@@ -391,7 +391,7 @@ public class PushNotificationScheduler implements Managed {
   private static String getPendingBackgroundNotificationQueueKey(final PushNotification.TokenType tokenType, final int slot) {
     final String prefix = switch (tokenType) {
       case APN -> PENDING_BACKGROUND_APN_NOTIFICATIONS_KEY_PREFIX;
-      case FCM -> PENDING_BACKGROUND_FCM_NOTIFICATIONS_KEY_PREFIX;
+      case NTFY -> PENDING_BACKGROUND_NTFY_NOTIFICATIONS_KEY_PREFIX;
     };
     return prefix + "::{" + RedisClusterUtil.getMinimalHashTag(slot) + "}";
   }
@@ -439,7 +439,7 @@ public class PushNotificationScheduler implements Managed {
     if (StringUtils.isNotBlank(device.getApnId())) {
       return "apns";
     } else if (StringUtils.isNotBlank(device.getGcmId())) {
-      return "fcm";
+      return "ntfy";
     } else {
       return "unknown";
     }
@@ -447,7 +447,7 @@ public class PushNotificationScheduler implements Managed {
 
   private static String getPushToken(final PushNotification.TokenType tokenType, final Device device) {
     return switch (tokenType) {
-      case FCM -> device.getGcmId();
+      case NTFY -> device.getGcmId();
       case APN -> device.getApnId();
     };
   }
