@@ -14,8 +14,25 @@ public record DeviceActivationRequest(
     ECSignedPreKey aciSignedPreKey,
 
     @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
+        If the account has a phone number, a signed EC pre-key to be associated with this account's PNI.
+        """)
+    Optional<@Valid ECSignedPreKey> pniSignedPreKey,
+
+    @NotNull
+    @Valid
+    @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = """
+        A signed Kyber-1024 "last resort" pre-key to be associated with this account's ACI.
+        """)
+    KEMSignedPreKey aciPqLastResortPreKey,
+
+    @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
+        If the account has a phone number, a signed Kyber-1024 "last resort" pre-key to be associated with this account's PNI.
+        """)
+    Optional<@Valid KEMSignedPreKey> pniPqLastResortPreKey,
+
+    @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
         An APNs token set for an Apple device. Android ntfy topics are provisioned after
-        registration through the authenticated account API.
+        authenticated registration.
         """)
     Optional<@Valid ApnRegistrationId> apnToken) {
 }
