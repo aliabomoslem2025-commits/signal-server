@@ -204,6 +204,9 @@ public class PushNotificationScheduler implements Managed {
    * @throws IllegalArgumentException if the given device does not have a push token
    */
   public CompletionStage<Void> scheduleBackgroundNotification(final PushNotification.TokenType tokenType, final Account account, final Device device) {
+    if (tokenType != PushNotification.TokenType.APN) {
+      throw new IllegalArgumentException("The background notification scheduler is reserved for APNs");
+    }
     if (StringUtils.isBlank(getPushToken(tokenType, device))) {
       throw new IllegalArgumentException("Device must have an " + tokenType + " token");
     }
