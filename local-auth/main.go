@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,7 +20,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"database/sql"
 	"strings"
 	"time"
 
