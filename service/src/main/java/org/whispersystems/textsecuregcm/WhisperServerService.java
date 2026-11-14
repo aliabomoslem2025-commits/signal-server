@@ -242,7 +242,7 @@ import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthController;
 import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.providers.MultiRecipientMessageProvider;
 import org.whispersystems.textsecuregcm.push.APNSender;
-import org.whispersystems.textsecuregcm.push.FcmSender;
+import org.whispersystems.textsecuregcm.push.NtfySender;
 import org.whispersystems.textsecuregcm.push.MessageSender;
 import org.whispersystems.textsecuregcm.push.ProvisioningManager;
 import org.whispersystems.textsecuregcm.push.PushNotificationManager;
@@ -646,8 +646,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     final BlockingQueue<Runnable> receiptSenderQueue = new LinkedBlockingQueue<>();
     Metrics.gaugeCollectionSize(name(getClass(), "receiptSenderQueue"), Collections.emptyList(), receiptSenderQueue);
-    final BlockingQueue<Runnable> fcmSenderQueue = new LinkedBlockingQueue<>();
-    Metrics.gaugeCollectionSize(name(getClass(), "fcmSenderQueue"), Collections.emptyList(), fcmSenderQueue);
     final BlockingQueue<Runnable> messageDeliveryQueue = new LinkedBlockingQueue<>();
     Metrics.gaugeCollectionSize(MetricsUtil.name(getClass(), "messageDeliveryQueue"), Collections.emptyList(),
         messageDeliveryQueue);
@@ -655,8 +653,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     ScheduledExecutorService recurringJobExecutor = ScheduledExecutorServiceBuilder.of(environment, "recurringJob").threads(6).build();
     ExecutorService apnSenderExecutor = ExecutorServiceBuilder.of(environment, "apnSender")
         .maxThreads(1).minThreads(1).build();
-    ExecutorService fcmSenderExecutor = ExecutorServiceBuilder.of(environment, "fcmSender")
-        .maxThreads(32).minThreads(32).workQueue(fcmSenderQueue).build();
     ExecutorService secureValueRecoveryServiceExecutor = ExecutorServiceBuilder.of(environment, "secureValueRecoveryService")
         .maxThreads(1).minThreads(1).build();
     ExecutorService storageServiceExecutor = ExecutorServiceBuilder.of(environment, "storageService")
@@ -829,11 +825,11 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         webAuthnCeremonyManager, totpManager);
     RemoteConfigsManager remoteConfigsManager = new RemoteConfigsManager(remoteConfigs, config.getRemoteConfigConfiguration().globalConfig());
     APNSender apnSender = new APNSender(apnSenderExecutor, Clock.systemUTC(), config.getApnConfiguration());
-    FcmSender fcmSender = new FcmSender(fcmSenderExecutor, config.getFcmConfiguration().credentials().value());
+    NtfySender ntfySender = new NtfySender(config.getNtfyConfiguration());
     PushNotificationScheduler pushNotificationScheduler = new PushNotificationScheduler(pushSchedulerCluster,
-        apnSender, fcmSender, accountsManager, 0, 0, retryExecutor);
+        apnSender, accountsManager, 0, 0, retryExecutor);
     PushNotificationManager pushNotificationManager =
-        new PushNotificationManager(accountsManager, apnSender, fcmSender, pushNotificationScheduler);
+        new PushNotificationManager(accountsManager, apnSender, ntfySender, pushNotificationScheduler);
     RateLimiters rateLimiters = RateLimiters.create(dynamicConfigurationManager, rateLimitersCluster, retryExecutor);
     ProvisioningManager provisioningManager = new ProvisioningManager(pubsubClient);
     IssuedReceiptsManager issuedReceiptsManager = new IssuedReceiptsManager(
