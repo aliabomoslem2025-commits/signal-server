@@ -47,7 +47,7 @@ public class PushNotificationScheduler implements Managed {
   private static final Logger logger = LoggerFactory.getLogger(PushNotificationScheduler.class);
 
   private static final String PENDING_BACKGROUND_APN_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_APN";
-  private static final String PENDING_BACKGROUND_FCM_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_FCM";
+  private static final String PENDING_BACKGROUND_NTFY_NOTIFICATIONS_KEY_PREFIX = "PENDING_BACKGROUND_FCM";
   private static final String LAST_BACKGROUND_NOTIFICATION_TIMESTAMP_KEY_PREFIX = "LAST_BACKGROUND_NOTIFICATION";
   private static final String PENDING_DELAYED_NOTIFICATIONS_KEY_PREFIX = "DELAYED";
 
@@ -65,7 +65,7 @@ public class PushNotificationScheduler implements Managed {
   private static final String ACCEPTED_TAG = "accepted";
 
   private final APNSender apnSender;
-  private final FcmSender fcmSender;
+  private final NtfySender ntfySender;
   private final AccountsManager accountsManager;
   private final FaultTolerantRedisClusterClient pushSchedulingCluster;
   private final ScheduledExecutorService retryExecutor;
@@ -160,7 +160,7 @@ public class PushNotificationScheduler implements Managed {
 
   public PushNotificationScheduler(final FaultTolerantRedisClusterClient pushSchedulingCluster,
       final APNSender apnSender,
-      final FcmSender fcmSender,
+      final NtfySender ntfySender,
       final AccountsManager accountsManager,
       final int dedicatedProcessWorkerThreadCount,
       final int workerMaxConcurrency,
@@ -168,7 +168,7 @@ public class PushNotificationScheduler implements Managed {
 
     this(pushSchedulingCluster,
         apnSender,
-        fcmSender,
+        ntfySender,
         accountsManager,
         Clock.systemUTC(),
         dedicatedProcessWorkerThreadCount,
@@ -179,7 +179,7 @@ public class PushNotificationScheduler implements Managed {
   @VisibleForTesting
   PushNotificationScheduler(final FaultTolerantRedisClusterClient pushSchedulingCluster,
       final APNSender apnSender,
-      final FcmSender fcmSender,
+      final NtfySender ntfySender,
       final AccountsManager accountsManager,
       final Clock clock,
       final int dedicatedProcessThreadCount,
@@ -187,7 +187,7 @@ public class PushNotificationScheduler implements Managed {
       final ScheduledExecutorService retryExecutor) throws IOException {
 
     this.apnSender = apnSender;
-    this.fcmSender = fcmSender;
+    this.ntfySender = ntfySender;
     this.accountsManager = accountsManager;
     this.pushSchedulingCluster = pushSchedulingCluster;
     this.clock = clock;
@@ -306,7 +306,7 @@ public class PushNotificationScheduler implements Managed {
     }
 
     final PushNotificationSender sender = switch (tokenType) {
-      case FCM -> fcmSender;
+      case FCM -> ntfySender;
       case APN -> apnSender;
     };
 
@@ -324,7 +324,7 @@ public class PushNotificationScheduler implements Managed {
 
   @VisibleForTesting
   CompletableFuture<Void> sendDelayedNotification(final Account account, final Device device) {
-    if (StringUtils.isAllBlank(device.getApnId(), device.getGcmId())) {
+    if (StringUtils.isAllBlank(device.getApnId(), device.getNtfyTopic())) {
       return CompletableFuture.completedFuture(null);
     }
 
@@ -339,7 +339,7 @@ public class PushNotificationScheduler implements Managed {
         device,
         true, null);
 
-    final PushNotificationSender pushNotificationSender = isApnsDevice ? apnSender : fcmSender;
+    final PushNotificationSender pushNotificationSender = isApnsDevice ? apnSender : ntfySender;
 
     return pushNotificationSender.sendNotification(pushNotification)
         .thenAccept(response -> Metrics.counter(DELAYED_NOTIFICATION_SENT_COUNTER_NAME,
