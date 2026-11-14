@@ -137,9 +137,9 @@ public record RegistrationRequest(@Schema(requiredMode = Schema.RequiredMode.NOT
       return false;
     }
     if (accountAttributes.getFetchesMessages()) {
-      return deviceActivationRequest().apnToken().isEmpty() && deviceActivationRequest().gcmToken().isEmpty();
+      return deviceActivationRequest().apnToken().isEmpty();
     } else {
-      return deviceActivationRequest().apnToken().isPresent() ^ deviceActivationRequest().gcmToken().isPresent();
+      return deviceActivationRequest().apnToken().isPresent();
     }
   }
 
