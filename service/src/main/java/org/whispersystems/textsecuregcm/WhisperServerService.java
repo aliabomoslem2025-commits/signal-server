@@ -1132,7 +1132,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     final List<ServerServiceDefinition> authenticatedServices = Stream.of(
             new AccountsGrpcService(accountsManager, rateLimiters, usernameHashZkProofVerifier,
                 phoneNumberRecoveryPasswordsManager, Clock.systemUTC(), changeNumberManager),
-            new CallingGrpcService(cloudflareTurnCredentialsManager, rateLimiters),
+            new CallingGrpcService(turnCredentialsProvider, rateLimiters),
             new CredentialsGrpcService(accountsManager, certificateGenerator, zkAuthOperations, callingGenericZkSecretParams, rateLimiters, Clock.systemUTC(), ExternalServiceDefinitions.createExternalServiceList(config, Clock.systemUTC())),
             new KeysGrpcService(accountsManager, keysManager, rateLimiters),
             new ProfileGrpcService(clock, accountsManager, profilesManager, asnInfoProviderSupplier, dynamicConfigurationManager, config.getBadges(), profileCdnPolicyGenerator, chatGenericZkSecretParams, profileBadgeConverter, rateLimiters),
