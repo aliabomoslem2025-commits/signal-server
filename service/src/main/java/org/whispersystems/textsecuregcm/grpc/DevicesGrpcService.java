@@ -114,37 +114,20 @@ public class DevicesGrpcService extends SimpleDevicesGrpc.DevicesImplBase {
   public SetPushTokenResponse setPushToken(final SetPushTokenRequest request) {
     final AuthenticatedDevice authenticatedDevice = AuthenticationUtil.requireAuthenticatedDevice();
 
-    @Nullable final String apnsToken;
-    @Nullable final String fcmToken;
+    final String apnsToken;
 
     switch (request.getTokenRequestCase()) {
-
-      case APNS_TOKEN_REQUEST -> {
-        final SetPushTokenRequest.ApnsTokenRequest apnsTokenRequest = request.getApnsTokenRequest();
-        apnsToken = StringUtils.stripToNull(apnsTokenRequest.getApnsToken());
-        fcmToken = null;
-      }
-
-      case FCM_TOKEN_REQUEST -> {
-        final SetPushTokenRequest.FcmTokenRequest fcmTokenRequest = request.getFcmTokenRequest();
-        apnsToken = null;
-        fcmToken = StringUtils.stripToNull(fcmTokenRequest.getFcmToken());
-      }
-
-      default -> throw GrpcExceptions.fieldViolation("token_request", "No tokens specified");
+      case APNS_TOKEN_REQUEST -> apnsToken = StringUtils.stripToNull(request.getApnsTokenRequest().getApnsToken());
+      default -> throw GrpcExceptions.fieldViolation("token_request", "Only APNs tokens are supported; Android devices register ntfy topics through the authenticated account API");
     }
 
     final Account account = getAuthenticatedAccount();
-
     final Device device = account.getDevice(authenticatedDevice.deviceId())
         .orElseThrow(() -> GrpcExceptions.invalidCredentials("invalid credentials"));
 
-    // Unlike FCM tokens, we need current "last updated" timestamps for APNs tokens and so update device records
-    // unconditionally if it's an APNS request
-    if (request.hasApnsTokenRequest() || !Objects.equals(device.getGcmId(), fcmToken)) {
+    if (request.hasApnsTokenRequest() || !Objects.equals(device.getApnId(), apnsToken)) {
       accountsManager.updateDevice(account.getAccountIdentifier(), authenticatedDevice.deviceId(), d -> {
         d.setApnId(apnsToken);
-        d.setGcmId(fcmToken);
         d.setFetchesMessages(false);
       });
     }
@@ -159,12 +142,11 @@ public class DevicesGrpcService extends SimpleDevicesGrpc.DevicesImplBase {
     accountsManager.updateDevice(authenticatedDevice.accountIdentifier(), authenticatedDevice.deviceId(), device -> {
       if (StringUtils.isNotBlank(device.getApnId())) {
         device.setUserAgent(device.isPrimary() ? "OWI" : "OWP");
-      } else if (StringUtils.isNotBlank(device.getGcmId())) {
+      } else {
         device.setUserAgent("OWA");
       }
 
       device.setApnId(null);
-      device.setGcmId(null);
       device.setFetchesMessages(true);
     });
 
