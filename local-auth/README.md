@@ -80,7 +80,7 @@ Tickets are HMAC-signed, expire after two minutes, are stored server-side, and c
 5. Set `LOCAL_AUTH_ONLY=true`, `LOCAL_AUTH_INTERNAL_URL`, and `LOCAL_AUTH_INTERNAL_TOKEN` on the Java Signal Server. The Java server's internal URL must resolve from the server process/container and must validate the proxy certificate.
 6. Set `ALLOWED_ORIGINS` in the sidecar environment to the exact HTTPS origin hosting the dashboard, for example `https://dashboard.lan`. Do not use a wildcard origin.
 7. Import `server-config.json` into the Android app under **Settings → Local Server**. Set `localAuthOnly=true`, the HTTPS auth/API and module endpoints, and the PEM CA certificate in `trustedCaPem`.
-8. In the app, open **Settings → Local Server → Copy device enrollment information**. In the dashboard create the user's phone record and enroll that Android ID + public key. Only then can that device request a challenge.
+8. On the app's phone-number registration screen, tap **Local server setup** before entering the number and choose **Copy device enrollment information**. In the dashboard create the user's phone record, then enroll that Android ID + public key. Only then can that device request a challenge. This pre-registration path avoids requiring an already-authenticated account to enroll its first device.
 
 Example reverse-proxy routing on the same host:
 - dashboard UI: `https://dashboard.lan/` → `http://127.0.0.1:8088/`
