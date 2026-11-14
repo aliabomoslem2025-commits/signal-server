@@ -331,7 +331,7 @@ public class PushNotificationScheduler implements Managed {
     final boolean isApnsDevice = StringUtils.isNotBlank(device.getApnId());
 
     final PushNotification pushNotification = new PushNotification(
-        isApnsDevice ? device.getApnId() : device.getGcmId(),
+        isApnsDevice ? device.getApnId() : device.getNtfyTopic(),
         isApnsDevice ? PushNotification.TokenType.APN : PushNotification.TokenType.NTFY,
         PushNotification.NotificationType.NOTIFICATION,
         null,
@@ -438,7 +438,7 @@ public class PushNotificationScheduler implements Managed {
   private static String getTokenType(final Device device) {
     if (StringUtils.isNotBlank(device.getApnId())) {
       return "apns";
-    } else if (StringUtils.isNotBlank(device.getGcmId())) {
+    } else if (StringUtils.isNotBlank(device.getNtfyTopic())) {
       return "ntfy";
     } else {
       return "unknown";
@@ -447,7 +447,7 @@ public class PushNotificationScheduler implements Managed {
 
   private static String getPushToken(final PushNotification.TokenType tokenType, final Device device) {
     return switch (tokenType) {
-      case NTFY -> device.getGcmId();
+      case NTFY -> device.getNtfyTopic();
       case APN -> device.getApnId();
     };
   }
