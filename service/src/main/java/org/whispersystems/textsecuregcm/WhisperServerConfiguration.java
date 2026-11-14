@@ -35,7 +35,7 @@ import org.whispersystems.textsecuregcm.configuration.DynamoDbTables;
 import org.whispersystems.textsecuregcm.configuration.ExternalRequestFilterConfiguration;
 import org.whispersystems.textsecuregcm.configuration.FaultTolerantRedisClientFactory;
 import org.whispersystems.textsecuregcm.configuration.FaultTolerantRedisClusterFactory;
-import org.whispersystems.textsecuregcm.configuration.FcmConfiguration;
+import org.whispersystems.textsecuregcm.configuration.NtfyConfiguration;
 import org.whispersystems.textsecuregcm.configuration.FoundationDbMessagesConfiguration;
 import org.whispersystems.textsecuregcm.configuration.GcpAttachmentsConfiguration;
 import org.whispersystems.textsecuregcm.configuration.GenericZkConfig;
@@ -196,7 +196,7 @@ public class WhisperServerConfiguration extends Configuration {
   @Valid
   @NotNull
   @JsonProperty
-  private FcmConfiguration fcm;
+  private NtfyConfiguration ntfy;
 
   @Valid
   @NotNull
@@ -477,8 +477,8 @@ public class WhisperServerConfiguration extends Configuration {
     return rateLimitersCluster;
   }
 
-  public FcmConfiguration getFcmConfiguration() {
-    return fcm;
+  public NtfyConfiguration getNtfyConfiguration() {
+    return ntfy;
   }
 
   public ApnConfiguration getApnConfiguration() {
