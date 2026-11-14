@@ -47,3 +47,16 @@ ALTER TABLE local_auth_devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ
 
 CREATE INDEX IF NOT EXISTS local_auth_challenges_expiry ON local_auth_challenges(expires_at);
 CREATE INDEX IF NOT EXISTS local_auth_tickets_expiry ON local_auth_tickets(expires_at);
+
+
+CREATE TABLE IF NOT EXISTS local_auth_admin_events (
+  id BIGSERIAL PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  target TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_ip TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS local_auth_admin_events_created
+  ON local_auth_admin_events(created_at DESC, id DESC);
