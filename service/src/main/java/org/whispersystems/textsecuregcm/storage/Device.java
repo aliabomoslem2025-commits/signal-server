@@ -5,6 +5,7 @@
 package org.whispersystems.textsecuregcm.storage;
 
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
@@ -24,6 +25,7 @@ import org.whispersystems.textsecuregcm.util.ByteArrayAdapter;
 import org.whispersystems.textsecuregcm.util.DeviceCapabilityAdapter;
 import org.whispersystems.textsecuregcm.util.DeviceNameByteArrayAdapter;
 
+@JsonIgnoreProperties({"gcmId"})
 public class Device {
 
   public static final byte PRIMARY_ID = 1;
@@ -56,7 +58,7 @@ public class Device {
   private String  salt;
 
   @JsonProperty
-  private String  gcmId;
+  private String ntfyTopic;
 
   @JsonProperty
   private String  apnId;
@@ -124,14 +126,13 @@ public class Device {
     return this.createdAtCiphertext;
   }
 
-  public String getGcmId() {
-    return gcmId;
+  public String getNtfyTopic() {
+    return ntfyTopic;
   }
 
-  public void setGcmId(String gcmId) {
-    this.gcmId = gcmId;
-
-    if (gcmId != null) {
+  public void setNtfyTopic(final String ntfyTopic) {
+    this.ntfyTopic = ntfyTopic;
+    if (ntfyTopic != null) {
       this.pushTimestamp = System.currentTimeMillis();
     }
   }
