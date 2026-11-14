@@ -127,6 +127,12 @@ public class ChangeNumberManager {
             userAgent, RegistrationLockVerificationManager.Flow.CHANGE_NUMBER, verificationType);
       }
 
+      // A LAN authentication ticket may be redeemed exactly once. Consume it after registration-lock
+      // verification has succeeded and immediately before applying the account's phone-number change.
+      if (sessionId != null && phoneVerificationTokenManager.isLocalAuthSession(sessionId)) {
+        phoneVerificationTokenManager.consumeLocalAuthSession(number, sessionId);
+      }
+
       Metrics.counter(CHANGE_NUMBER_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
               Tag.of(VERIFICATION_TYPE_TAG_NAME, verificationType.name())))
           .increment();
