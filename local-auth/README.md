@@ -116,3 +116,8 @@ The dashboard administrator API also supports these routes:
 - `GET /v1/local-auth/admin/events?limit=50` to view the newest administrative changes. The limit is restricted to 1–100. Events include user creation/deletion, user enable/disable, device enrollment/revocation, timestamp, the connection peer address (which may be the reverse proxy), and non-secret metadata.
 
 The audit log is not an immutable external compliance ledger. Protect the PostgreSQL volume and backups with the same controls as the authentication database.
+
+
+### Scope of local-auth suspension
+
+Suspending a user or device blocks future local-auth challenges and consumes outstanding registration tickets. It does not terminate existing Signal sessions or remove an already-registered Signal device. Immediate remote sign-out requires a separate account/device administration integration with the Java Signal Server; this sidecar alone is an enrollment allowlist.
