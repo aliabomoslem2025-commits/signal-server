@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.util.List;
 import org.glassfish.jersey.server.ManagedAsync;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
-import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.TurnCredentialsProvider;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
 
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Calling")
@@ -28,17 +28,17 @@ import org.whispersystems.textsecuregcm.limits.RateLimiters;
 public class CallRoutingControllerV2 {
 
   private final RateLimiters rateLimiters;
-  private final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager;
+  private final TurnCredentialsProvider turnCredentialsProvider;
 
-  private static final Counter CLOUDFLARE_TURN_ERROR_COUNTER =
-      Metrics.counter(name(CallRoutingControllerV2.class, "cloudflareTurnError"));
+  private static final Counter TURN_CREDENTIALS_ERROR_COUNTER =
+      Metrics.counter(name(CallRoutingControllerV2.class, "turnCredentialsError"));
 
   public CallRoutingControllerV2(
       final RateLimiters rateLimiters,
-      final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager) {
+      final TurnCredentialsProvider turnCredentialsProvider) {
 
     this.rateLimiters = rateLimiters;
-    this.cloudflareTurnCredentialsManager = cloudflareTurnCredentialsManager;
+    this.turnCredentialsProvider = turnCredentialsProvider;
   }
 
   @GET
@@ -62,9 +62,9 @@ public class CallRoutingControllerV2 {
     rateLimiters.getCallEndpointLimiter().validate(auth.accountIdentifier());
 
     try {
-      return new GetCallingRelaysResponse(List.of(cloudflareTurnCredentialsManager.retrieveFromCloudflare(auth.accountIdentifier())));
+      return new GetCallingRelaysResponse(List.of(turnCredentialsProvider.retrieve(auth.accountIdentifier())));
     } catch (final Exception e) {
-      CLOUDFLARE_TURN_ERROR_COUNTER.increment();
+      TURN_CREDENTIALS_ERROR_COUNTER.increment();
       throw e;
     }
   }
