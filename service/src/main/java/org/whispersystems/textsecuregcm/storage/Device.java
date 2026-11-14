@@ -124,6 +124,23 @@ public class Device {
     return this.createdAtCiphertext;
   }
 
+  /**
+   * The ntfy topic is stored in the legacy gcmId field to preserve existing DynamoDB records
+   * and the Signal device-registration wire format during the transport migration.
+   */
+  public String getNtfyTopic() {
+    return gcmId;
+  }
+
+  public void setNtfyTopic(String topic) {
+    this.gcmId = topic;
+    if (topic != null) {
+      this.pushTimestamp = System.currentTimeMillis();
+    }
+  }
+
+  /** @deprecated Use getNtfyTopic; retained only for legacy record migration. */
+  @Deprecated
   public String getGcmId() {
     return gcmId;
   }
