@@ -259,8 +259,9 @@ apn: # Apple Push Notifications configuration
   teamId: secret://apn.teamId
   signingKey: secret://apn.signingKey
 
-fcm: # FCM configuration
-  credentials: secret://fcm.credentials
+ntfy: # Self-hosted ntfy wake-up transport. The publisher token must be write-only for signal-* topics.
+  baseUrl: https://push.example.invalid
+  publisherToken: secret://ntfy.publisherToken
 
 cdn:
   bucket: cdn        # S3 Bucket name
