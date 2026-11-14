@@ -19,10 +19,7 @@ public record PushNotification(String deviceToken,
                                boolean urgent,
                                @Nullable Duration ttl) {
 
-  // APNs allows up to 30 days, but FCM allows a max of 28. See:
-  //
-  // - https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns
-  // - https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan
+  // Preserve the existing 28-day upper bound for the remaining APNs notification path.
   private static final Duration MAX_TTL = Duration.ofDays(28);
 
   public enum NotificationType {
@@ -34,7 +31,7 @@ public record PushNotification(String deviceToken,
   }
 
   public enum TokenType {
-    FCM,
+    NTFY,
     APN
   }
 
