@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-package org.whispersystems.textsecuregcm.push;
+package org.whispersystems.textsecurentfy.push;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,12 +32,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
-import org.whispersystems.textsecuregcm.redis.FaultTolerantRedisClusterClient;
-import org.whispersystems.textsecuregcm.redis.RedisClusterExtension;
-import org.whispersystems.textsecuregcm.storage.Account;
-import org.whispersystems.textsecuregcm.storage.AccountsManager;
-import org.whispersystems.textsecuregcm.storage.Device;
-import org.whispersystems.textsecuregcm.util.TestClock;
+import org.whispersystems.textsecurentfy.redis.FaultTolerantRedisClusterClient;
+import org.whispersystems.textsecurentfy.redis.RedisClusterExtension;
+import org.whispersystems.textsecurentfy.storage.Account;
+import org.whispersystems.textsecurentfy.storage.AccountsManager;
+import org.whispersystems.textsecurentfy.storage.Device;
+import org.whispersystems.textsecurentfy.util.TestClock;
 
 class PushNotificationSchedulerTest {
 
@@ -57,7 +57,7 @@ class PushNotificationSchedulerTest {
   private static final String ACCOUNT_NUMBER = "+18005551234";
   private static final byte DEVICE_ID = 1;
   private static final String APN_ID = RandomStringUtils.secure().nextAlphanumeric(32);
-  private static final String GCM_ID = RandomStringUtils.secure().nextAlphanumeric(32);
+  private static final String NTFY_TOPIC = RandomStringUtils.secure().nextAlphanumeric(32);
 
   @BeforeEach
   void setUp() throws Exception {
@@ -65,7 +65,7 @@ class PushNotificationSchedulerTest {
     device = mock(Device.class);
     when(device.getId()).thenReturn(DEVICE_ID);
     when(device.getApnId()).thenReturn(APN_ID);
-    when(device.getGcmId()).thenReturn(GCM_ID);
+    when(device.getGcmId()).thenReturn(NTFY_TOPIC);
     when(device.getLastSeen()).thenReturn(System.currentTimeMillis());
 
     account = mock(Account.class);
@@ -176,7 +176,7 @@ class PushNotificationSchedulerTest {
 
     assertEquals(tokenType, pushNotification.tokenType());
     assertEquals(switch (tokenType) {
-      case FCM -> GCM_ID;
+      case FCM -> NTFY_TOPIC;
       case APN -> APN_ID;
     }, pushNotification.deviceToken());
     assertEquals(account, pushNotification.destination());
