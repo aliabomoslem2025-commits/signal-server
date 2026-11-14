@@ -97,6 +97,7 @@ import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
 import org.whispersystems.textsecuregcm.auth.DisconnectionRequestManager;
 import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentialsGenerator;
 import org.whispersystems.textsecuregcm.auth.IdlePrimaryDeviceAuthenticatedWebSocketUpgradeFilter;
+import org.whispersystems.textsecuregcm.auth.LocalAuthTicketClient;
 import org.whispersystems.textsecuregcm.auth.PhoneVerificationTokenManager;
 import org.whispersystems.textsecuregcm.auth.RegistrationLockVerificationManager;
 import org.whispersystems.textsecuregcm.auth.webauthn.WebAuthnCeremonyManager;
@@ -772,8 +773,10 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             config.getHlrLookupConfiguration().retryConfigurationName(),
             retryExecutor);
 
-    RegistrationServiceClient registrationServiceClient = config.getRegistrationServiceConfiguration()
-        .build(environment, registrationIdentityTokenRefreshExecutor);
+    final boolean localAuthOnly = LocalAuthTicketClient.isLocalAuthOnlyEnabled();
+    final RegistrationServiceClient registrationServiceClient = localAuthOnly
+        ? null
+        : config.getRegistrationServiceConfiguration().build(environment, registrationIdentityTokenRefreshExecutor);
     KeyTransparencyServiceClient keyTransparencyServiceClient = new KeyTransparencyServiceClient(
         config.getKeyTransparencyServiceConfiguration().host(),
         config.getKeyTransparencyServiceConfiguration().port(),
@@ -943,7 +946,9 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(provisioningManager);
     environment.lifecycle().manage(disconnectionRequestManager);
     environment.lifecycle().manage(currencyManager);
-    environment.lifecycle().manage(registrationServiceClient);
+    if (registrationServiceClient != null) {
+      environment.lifecycle().manage(registrationServiceClient);
+    }
     environment.lifecycle().manage(keyTransparencyServiceClient);
     environment.lifecycle().manage(clientReleaseManager);
     environment.lifecycle().manage(virtualThreadPinEventMonitor);
@@ -1338,10 +1343,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         new SecureStorageController(storageCredentialsGenerator),
         new SecureValueRecovery2Controller(svr2CredentialsGenerator, accountsManager),
         new StickerController(rateLimiters, stickerPolicyGenerator, Clock.systemUTC()),
-        new VerificationController(registrationServiceClient, new VerificationSessionManager(verificationSessions),
-            pushNotificationManager, registrationCaptchaManager, phoneNumberRecoveryPasswordsManager,
-            phoneNumberIdentifiers, rateLimiters, accountsManager, carrierDataProvider, registrationFraudChecker,
-            dynamicConfigurationManager, clock),
         new SubscriptionController(clock, config.getSubscription(), config.getOneTimeDonations(),
             config.getLoginPurchase(), subscriptionManager, stripeManager, braintreeManager, googlePlayBillingManager,
             appleAppStoreManager,
@@ -1352,6 +1353,16 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             donationPermitsManager),
         new LoginPurchaseController(loginPurchaseManager, dynamicConfigurationManager)
     );
+
+    // Legacy SMS/voice verification is not registered at all in local-auth-only deployments.
+    // The Android app obtains a signed LAN ticket from the Local Device Authentication service instead.
+    if (registrationServiceClient != null) {
+      commonControllers.add(new VerificationController(registrationServiceClient,
+          new VerificationSessionManager(verificationSessions), pushNotificationManager,
+          registrationCaptchaManager, phoneNumberRecoveryPasswordsManager, phoneNumberIdentifiers,
+          rateLimiters, accountsManager, carrierDataProvider, registrationFraudChecker,
+          dynamicConfigurationManager, clock));
+    }
 
     for (Object controller : commonControllers) {
       environment.jersey().register(controller);
