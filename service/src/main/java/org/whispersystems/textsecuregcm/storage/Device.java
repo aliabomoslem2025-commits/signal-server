@@ -25,7 +25,8 @@ import org.whispersystems.textsecuregcm.util.ByteArrayAdapter;
 import org.whispersystems.textsecuregcm.util.DeviceCapabilityAdapter;
 import org.whispersystems.textsecuregcm.util.DeviceNameByteArrayAdapter;
 
-@JsonIgnoreProperties({"gcmId"})
+// Ignore fields left by older client builds without retaining any legacy push-token implementation.
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Device {
 
   public static final byte PRIMARY_ID = 1;
