@@ -57,7 +57,6 @@ func TestRegistrationSessionIDUsesBase64URL(t *testing.T) {
 	}
 }
 
-
 func TestParsePublicKeyAcceptsOnlyP256(t *testing.T) {
 	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -116,7 +115,6 @@ func TestAndroidIDHashIsKeyedAndDeterministic(t *testing.T) {
 		t.Fatal("different Android IDs produced the same HMAC")
 	}
 }
-
 
 func TestAdminUserStatusRequiresPatch(t *testing.T) {
 	s := &server{}
