@@ -139,10 +139,10 @@ public class AccountController {
   public void setApnRegistrationId(@Auth AuthenticatedDevice auth,
       @NotNull @Valid ApnRegistrationId registrationId) {
 
-    // Unlike FCM tokens, we need current "last updated" timestamps for APNs tokens and so update device records
-    // unconditionally
+    // Refresh the APNs token and its last-updated timestamp unconditionally.
     accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), d -> {
       d.setApnId(registrationId.apnRegistrationId());
+      d.setNtfyTopic(null);
       d.setFetchesMessages(false);
     });
   }
