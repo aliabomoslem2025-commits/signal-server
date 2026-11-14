@@ -273,7 +273,7 @@ public class AccountsManager extends RedisPubSubAdapter<String, String> implemen
     public static PushTokenType fromDevice(final Device device) {
       if (StringUtils.isNotBlank(device.getApnId())) {
         return PushTokenType.APNS;
-      } else if (StringUtils.isNotBlank(device.getGcmId())) {
+      } else if (StringUtils.isNotBlank(device.getNtfyTopic())) {
         return PushTokenType.FCM;
       } else {
         return PushTokenType.NONE;
