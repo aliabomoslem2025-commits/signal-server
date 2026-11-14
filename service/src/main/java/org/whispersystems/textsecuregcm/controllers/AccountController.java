@@ -28,6 +28,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
+import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
@@ -49,7 +50,7 @@ import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
 import org.whispersystems.textsecuregcm.entities.ConfirmUsernameHashRequest;
 import org.whispersystems.textsecuregcm.entities.DeviceName;
 import org.whispersystems.textsecuregcm.entities.EncryptedUsername;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
+import org.whispersystems.textsecuregcm.entities.NtfyRegistrationResponse;
 import org.whispersystems.textsecuregcm.entities.RegistrationLock;
 import org.whispersystems.textsecuregcm.entities.ReserveUsernameHashRequest;
 import org.whispersystems.textsecuregcm.entities.ReserveUsernameHashResponse;
@@ -94,39 +95,40 @@ public class AccountController {
     this.usernameHashZkProofVerifier = usernameHashZkProofVerifier;
   }
 
+  private static final SecureRandom NTFY_TOPIC_RANDOM = new SecureRandom();
+
+  /**
+   * Idempotently provisions a private, high-entropy ntfy topic for the authenticated device.
+   * The topic is a bearer capability: it is returned only to this device and must not be logged.
+   */
   @PUT
-  @Path("/gcm/")
-  @Consumes(MediaType.APPLICATION_JSON)
+  @Path("/ntfy/")
   @Produces(MediaType.APPLICATION_JSON)
   @ManagedAsync
-  public void setGcmRegistrationId(@Auth AuthenticatedDevice auth,
-      @NotNull @Valid GcmRegistrationId registrationId) {
-
-    final String currentGcmId = accounts.getByAccountIdentifier(auth.accountIdentifier())
-        .flatMap(account -> account.getDevice(auth.deviceId()))
-        .orElseThrow(() -> new WebApplicationException(Status.UNAUTHORIZED))
-        .getGcmId();
-
-    if (Objects.equals(currentGcmId, registrationId.gcmRegistrationId())) {
-      return;
-    }
-
+  public NtfyRegistrationResponse registerNtfyTopic(@Auth AuthenticatedDevice auth) {
     accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), device -> {
-      device.setApnId(null);
-      device.setGcmId(registrationId.gcmRegistrationId());
-      device.setFetchesMessages(false);
+      if (StringUtils.isBlank(device.getNtfyTopic())) {
+        final byte[] entropy = new byte[24];
+        NTFY_TOPIC_RANDOM.nextBytes(entropy);
+        device.setNtfyTopic(Base64.getUrlEncoder().withoutPadding().encodeToString(entropy));
+        device.setApnId(null);
+        device.setFetchesMessages(false);
+      }
     });
+
+    final String topic = accounts.getByAccountIdentifier(auth.accountIdentifier())
+        .flatMap(account -> account.getDevice(auth.deviceId()))
+        .map(Device::getNtfyTopic)
+        .filter(StringUtils::isNotBlank)
+        .orElseThrow(() -> new WebApplicationException(Status.UNAUTHORIZED));
+    return new NtfyRegistrationResponse(topic);
   }
 
   @DELETE
-  @Path("/gcm/")
+  @Path("/ntfy/")
   @ManagedAsync
-  public void deleteGcmRegistrationId(@Auth AuthenticatedDevice auth) {
-    accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), d -> {
-      d.setGcmId(null);
-      d.setFetchesMessages(false);
-      d.setUserAgent("OWA");
-    });
+  public void revokeNtfyTopic(@Auth AuthenticatedDevice auth) {
+    accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), device -> device.setNtfyTopic(null));
   }
 
   @PUT
@@ -141,7 +143,6 @@ public class AccountController {
     // unconditionally
     accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), d -> {
       d.setApnId(registrationId.apnRegistrationId());
-      d.setGcmId(null);
       d.setFetchesMessages(false);
     });
   }
