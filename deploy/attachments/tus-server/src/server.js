@@ -229,6 +229,11 @@ const app = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
+    if (pathname === '/healthz' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('ok');
+      return;
+    }
     if (pathname.startsWith('/upload/attachments')) return await attachments.server.handle(req, res);
     if (pathname.startsWith('/upload/backups')) return await backups.server.handle(req, res);
 
