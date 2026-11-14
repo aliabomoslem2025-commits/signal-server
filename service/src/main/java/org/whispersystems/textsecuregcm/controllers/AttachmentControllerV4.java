@@ -27,6 +27,8 @@ import java.security.SecureRandom;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import org.glassfish.jersey.server.ManagedAsync;
+import org.whispersystems.textsecuregcm.attachments.AttachmentGenerator;
+import org.whispersystems.textsecuregcm.attachments.AttachmentUtil;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.entities.AttachmentDescriptorV3;
