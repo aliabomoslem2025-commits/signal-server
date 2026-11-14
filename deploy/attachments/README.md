@@ -13,6 +13,51 @@ Expose only the TUS service through the LAN HTTPS reverse proxy:
 
 The Signal Server must set `tus.uploadUri: https://cdn3.lan/upload`; the Android `server-config.json` must set `services.cdn3: https://cdn3.lan`.
 
+## Start the Docker deployment
+
+From the repository root:
+
+```sh
+cd deploy/attachments
+cp .env.example .env
+openssl rand -base64 32
+```
+
+Put the generated Base64 secret in `TUS_SHARED_AUTH_SECRET_BASE64`. Generate independent values for `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY`; the TUS service account is restricted to the two buckets by `minio-policy.json`. Never reuse MinIO root credentials as the TUS service credentials.
+
+Start and inspect the stack:
+
+```sh
+docker compose up -d --build
+docker compose ps
+docker compose logs -f minio-bootstrap tus-server
+```
+
+The MinIO API and console are bound to loopback only (ports 9000/9001 by default). The TUS service is bound to loopback on port 8096 and exposes `GET /healthz` for its Docker healthcheck. Do not publish MinIO or the staging spool to the LAN.
+
+Configure the Signal Server's private YAML with the exact same decoded 32-byte secret:
+
+```yaml
+tus:
+  uploadUri: https://cdn3.lan/upload
+  userAuthenticationTokenSharedSecret: secret://tus.userAuthenticationTokenSharedSecret
+  tokenExpiration: P7D
+```
+
+The secret value in the server's secret store must be the same bytes as `TUS_SHARED_AUTH_SECRET_BASE64` after Base64 decoding. Keep the server-side setting as raw 32-byte secret material; do not copy the Base64 text as though it were the raw secret.
+
+Configure Android runtime settings:
+
+```json
+{
+  "services": {
+    "cdn3": "https://cdn3.lan"
+  }
+}
+```
+
+The LAN HTTPS reverse proxy must route `/upload/`, `/attachments/`, and `/backups/` to the TUS service, preserve streaming PATCH requests, and disable request-body buffering on `/upload/`. The service supports attachment and backup upload/download, but a complete backup restore still needs a real-device verification pass.
+
 ## Authentication and limits
 
 The service verifies the same HMAC-SHA256 JWTs that Signal Server creates. It validates audience (`attachments` or `backups`), subject, expiration, upload `maxLen`, and backup `scope` (`write` for TUS upload, `read` for downloads). Uploads are first streamed to a private local spool and then copied to MinIO; successful objects receive the `signal-checksum-sha256` metadata used by Signal clients. No Signal message plaintext or encryption key is handled by this service.
