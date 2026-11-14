@@ -251,8 +251,9 @@ apn: # Apple Push Notifications configuration
   teamId: secret://apn.teamId
   signingKey: secret://apn.signingKey
 
-fcm: # FCM configuration
-  credentials: secret://fcm.credentials
+ntfy: # Private self-hosted ntfy push transport
+  baseUrl: https://push.example.com
+  publisherToken: secret://ntfy.publisherToken
 
 cdn:
   bucket: cdn        # S3 Bucket name
