@@ -28,7 +28,7 @@ import org.whispersystems.textsecuregcm.http.FaultTolerantHttpClient;
 import org.whispersystems.textsecuregcm.storage.DynamicConfigurationManager;
 import org.whispersystems.textsecuregcm.util.SystemMapper;
 
-public class CloudflareTurnCredentialsManager {
+public class CloudflareTurnCredentialsManager implements TurnCredentialsProvider {
 
   private static final Logger logger = LoggerFactory.getLogger(CloudflareTurnCredentialsManager.class);
 
@@ -101,6 +101,11 @@ public class CloudflareTurnCredentialsManager {
         .build();
 
     this.clientCredentialTtl = clientCredentialTtl;
+  }
+
+  @Override
+  public TurnToken retrieve(final UUID accountUuid) throws IOException {
+    return retrieveFromCloudflare(accountUuid);
   }
 
   public TurnToken retrieveFromCloudflare(UUID accountUuid) throws IOException {
