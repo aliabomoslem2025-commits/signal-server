@@ -97,7 +97,9 @@ public final class NtfySender implements PushNotificationSender {
         .header("Cache", "yes")
         .header("X-Title", "Signal")
         .header("Priority", notification.urgent() ? "5" : "3");
-    notification.ttl().ifPresent(ttl -> requestBuilder.header("X-Message-TTL", Long.toString(ttl.toSeconds())));
+    if (notification.ttl() != null) {
+      requestBuilder.header("X-Message-TTL", Long.toString(notification.ttl().toSeconds()));
+    }
     final HttpRequest request = requestBuilder
         .POST(HttpRequest.BodyPublishers.ofString(message, StandardCharsets.UTF_8))
         .build();
