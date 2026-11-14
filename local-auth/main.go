@@ -217,6 +217,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/v1/local-auth/internal/validate-ticket", s.requireBearer(s.cfg.internalToken, s.handleValidateTicket))
 	mux.HandleFunc("/v1/local-auth/internal/consume-ticket", s.requireBearer(s.cfg.internalToken, s.handleConsumeTicket))
 	mux.HandleFunc("/v1/local-auth/admin/users", s.requireBearer(s.cfg.adminToken, s.handleUsers))
+	mux.HandleFunc("/v1/local-auth/admin/user-status/", s.requireBearer(s.cfg.adminToken, s.handleAdminUserStatus))
+	mux.HandleFunc("/v1/local-auth/admin/events", s.requireBearer(s.cfg.adminToken, s.handleAdminEvents))
 	mux.HandleFunc("/v1/local-auth/admin/users/", s.requireBearer(s.cfg.adminToken, s.handleUserSubresource))
 	mux.HandleFunc("/v1/local-auth/admin/devices/", s.requireBearer(s.cfg.adminToken, s.handleDevice))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +230,7 @@ func (s *server) routes() http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -327,6 +329,7 @@ func (s *server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not save user")
 			return
 		}
+		s.recordAdminEvent(r, "user.created_or_enabled", request.Phone, map[string]any{"displayName": request.DisplayName})
 		writeJSON(w, http.StatusCreated, map[string]string{"phone": request.Phone})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -352,6 +355,7 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
+		s.recordAdminEvent(r, "user.deleted", phone, nil)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -441,6 +445,7 @@ func (s *server) handleUserSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "could not enroll device")
 				return
 			}
+			s.recordAdminEvent(r, "device.enrolled", phone, map[string]any{"deviceId": deviceID, "label": request.Label})
 			writeJSON(w, http.StatusCreated, map[string]string{"deviceId": deviceID})
 			return
 		}
@@ -468,6 +473,7 @@ func (s *server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "active device not found")
 		return
 	}
+	s.recordAdminEvent(r, "device.revoked", id, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
