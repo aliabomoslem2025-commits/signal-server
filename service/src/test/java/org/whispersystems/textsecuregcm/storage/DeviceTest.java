@@ -47,6 +47,18 @@ class DeviceTest {
   }
 
   @Test
+  void ignoresUnknownLegacyDeviceFields() throws JsonProcessingException {
+    final Device device = SystemMapper.jsonMapper().readValue("""
+        {
+          "id": 1,
+          "legacyPushToken": "must-not-be-used"
+        }
+        """, Device.class);
+
+    assertEquals(Device.PRIMARY_ID, device.getId());
+  }
+
+  @Test
   void deserializeCapabilities() throws JsonProcessingException {
     {
       final Device device = SystemMapper.jsonMapper().readValue("""

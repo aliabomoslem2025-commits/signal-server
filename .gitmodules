@@ -9,3 +9,7 @@
 [submodule "spam-filter"]
 	path = spam-filter
 	url = REDACTED
+
+[submodule "calling-service"]
+	path = deploy/calling-service/upstream
+	url = https://github.com/signalapp/Signal-Calling-Service.git

@@ -36,20 +36,19 @@ public record LinkDeviceRequest(@Schema(requiredMode = Schema.RequiredMode.REQUI
                            @JsonProperty("pniSignedPreKey") Optional<@Valid ECSignedPreKey> pniSignedPreKey,
                            @JsonProperty("aciPqLastResortPreKey") @NotNull @Valid KEMSignedPreKey aciPqLastResortPreKey,
                            @JsonProperty("pniPqLastResortPreKey") Optional<@Valid KEMSignedPreKey> pniPqLastResortPreKey,
-                           @JsonProperty("apnToken") Optional<@Valid ApnRegistrationId> apnToken,
-                           @JsonProperty("gcmToken") Optional<@Valid GcmRegistrationId> gcmToken) {
+                           @JsonProperty("apnToken") Optional<@Valid ApnRegistrationId> apnToken) {
 
     this(verificationCode, deviceAttributes,
-        new DeviceActivationRequest(aciSignedPreKey, pniSignedPreKey, aciPqLastResortPreKey, pniPqLastResortPreKey, apnToken, gcmToken));
+        new DeviceActivationRequest(aciSignedPreKey, pniSignedPreKey, aciPqLastResortPreKey, pniPqLastResortPreKey, apnToken));
   }
 
   @AssertTrue
   @Schema(hidden = true)
   public boolean isExactlyOneMessageDeliveryChannel() {
     if (deviceAttributes != null && deviceAttributes.fetchesMessages()) {
-      return deviceActivationRequest().apnToken().isEmpty() && deviceActivationRequest().gcmToken().isEmpty();
+      return deviceActivationRequest().apnToken().isEmpty();
     } else {
-      return deviceActivationRequest().apnToken().isPresent() ^ deviceActivationRequest().gcmToken().isPresent();
+      return deviceActivationRequest().apnToken().isPresent();
     }
   }
 }

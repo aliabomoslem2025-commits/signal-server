@@ -1074,7 +1074,6 @@ class AccountsManagerTest {
         new DeviceIdentityInfo(aciRegistrationId, aciSignedPreKey, aciPqLastResortPreKey),
         Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)).filter(_ -> hasPhoneNumber),
         true,
-        Optional.empty(),
         Optional.empty());
 
     when(accounts.reclaimAccount(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(null));
@@ -1099,7 +1098,7 @@ class AccountsManagerTest {
     assertEquals(hasPhoneNumber ? Optional.of(pniRegistrationId) : Optional.empty(), reclaimedPrimaryDevice.getPhoneNumberIdentityRegistrationId());
     assertTrue(reclaimedPrimaryDevice.getFetchesMessages());
     assertTrue(StringUtils.isBlank(reclaimedPrimaryDevice.getApnId()));
-    assertTrue(StringUtils.isBlank(reclaimedPrimaryDevice.getGcmId()));
+    assertTrue(StringUtils.isBlank(reclaimedPrimaryDevice.getNtfyTopic()));
 
     assertTrue(reclaimedAccount.getAccountRecoveryPassword().orElseThrow().verify(HexFormat.of().formatHex(recoveryPassword)));
     assertTrue(reclaimedPrimaryDevice.getAuthTokenHash().verify(primaryDeviceSpec.password()));
@@ -1173,7 +1172,6 @@ class AccountsManagerTest {
           new DeviceIdentityInfo(aciRegistrationId, aciSignedPreKey, aciPqLastResortPreKey),
           Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
           true,
-          Optional.empty(),
           Optional.empty());
 
       assertThrows(IllegalArgumentException.class, () -> accountsManager.recover(existingAccount,
@@ -1204,7 +1202,6 @@ class AccountsManagerTest {
           new DeviceIdentityInfo(aciRegistrationId, aciSignedPreKey, aciPqLastResortPreKey),
           Optional.empty(),
           true,
-          Optional.empty(),
           Optional.empty());
 
       assertThrows(IllegalArgumentException.class, () -> accountsManager.recover(existingAccount,
@@ -1311,7 +1308,6 @@ class AccountsManagerTest {
             new DeviceIdentityInfo(aciRegistrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)).filter(_ -> accountHasPhoneNumber),
             true,
-            Optional.empty(),
             Optional.empty()),
             accountsManager.generateLinkDeviceToken(account));
 
@@ -1339,7 +1335,7 @@ class AccountsManagerTest {
     assertEquals(accountHasPhoneNumber ? Optional.of(pniRegistrationId) : Optional.empty(), device.getPhoneNumberIdentityRegistrationId());
     assertTrue(device.getFetchesMessages());
     assertNull(device.getApnId());
-    assertNull(device.getGcmId());
+    assertNull(device.getNtfyTopic());
   }
 
   @Test
@@ -1379,7 +1375,6 @@ class AccountsManagerTest {
                 new DeviceIdentityInfo(17, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                 Optional.of(new DeviceIdentityInfo(19, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                 true,
-                Optional.empty(),
                 Optional.empty()),
             linkDeviceToken));
 
@@ -1879,7 +1874,6 @@ class AccountsManagerTest {
             new DeviceIdentityInfo(accountAttributes.getRegistrationId(), KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.empty(),
             accountAttributes.getFetchesMessages(),
-            Optional.empty(),
             Optional.empty()),
         null);
   }
@@ -1906,7 +1900,6 @@ class AccountsManagerTest {
             new DeviceIdentityInfo(accountAttributes.getRegistrationId(), KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.empty(),
             accountAttributes.getFetchesMessages(),
-            Optional.empty(),
             Optional.empty()),
         null);
   }
@@ -1929,7 +1922,6 @@ class AccountsManagerTest {
                 KeysHelper.signedECPreKey(2, pniKeyPair),
                 KeysHelper.signedKEMPreKey(4, pniKeyPair))),
             accountAttributes.getFetchesMessages(),
-            Optional.empty(),
             Optional.empty()),
         null);
   }

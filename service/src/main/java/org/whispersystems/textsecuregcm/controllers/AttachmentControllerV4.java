@@ -24,17 +24,14 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.security.SecureRandom;
-import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import org.glassfish.jersey.server.ManagedAsync;
 import org.whispersystems.textsecuregcm.attachments.AttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.AttachmentUtil;
-import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.entities.AttachmentDescriptorV3;
-import org.whispersystems.textsecuregcm.experiment.ExperimentEnrollmentManager;
 import org.whispersystems.textsecuregcm.limits.RateLimiter;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
 import org.whispersystems.textsecuregcm.metrics.MetricsUtil;
@@ -49,12 +46,11 @@ import org.whispersystems.textsecuregcm.metrics.UserAgentTagUtil;
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Attachments")
 public class AttachmentControllerV4 {
 
-  private final ExperimentEnrollmentManager experimentEnrollmentManager;
   private final RateLimiter countRateLimiter;
   private final RateLimiter bytesRateLimiter;
   private final long maxUploadLength;
 
-  private final Map<Integer, AttachmentGenerator> attachmentGenerators;
+  private final TusAttachmentGenerator tusAttachmentGenerator;
 
   private static final String ATTACHMENT_SIZE_NAME =
       MetricsUtil.name(AttachmentControllerV4.class, "attachmentSize");
@@ -64,19 +60,13 @@ public class AttachmentControllerV4 {
 
   public AttachmentControllerV4(
       final RateLimiters rateLimiters,
-      final GcsAttachmentGenerator gcsAttachmentGenerator,
       final TusAttachmentGenerator tusAttachmentGenerator,
-      final ExperimentEnrollmentManager experimentEnrollmentManager,
       final long maxUploadLength) {
     this.countRateLimiter = rateLimiters.getAttachmentLimiter();
     this.bytesRateLimiter = rateLimiters.getAttachmentBytesLimiter();
-    this.experimentEnrollmentManager = experimentEnrollmentManager;
+    this.tusAttachmentGenerator = tusAttachmentGenerator;
     this.maxUploadLength = maxUploadLength;
     this.secureRandom = new SecureRandom();
-    this.attachmentGenerators = Map.of(
-        2, gcsAttachmentGenerator,
-        3, tusAttachmentGenerator
-    );
   }
 
   @GET
@@ -126,10 +116,8 @@ public class AttachmentControllerV4 {
         .record(uploadLength);
 
     final String key = AttachmentUtil.generateAttachmentKey(secureRandom);
-    final boolean useCdn3 = this.experimentEnrollmentManager.isEnrolled(auth.accountIdentifier(), AttachmentUtil.CDN3_EXPERIMENT_NAME);
-    int cdn = useCdn3 ? 3 : 2;
-    final AttachmentGenerator.Descriptor descriptor = this.attachmentGenerators.get(cdn).generateAttachment(key, uploadLength);
-    return new AttachmentDescriptorV3(cdn, key, descriptor.headers(), descriptor.signedUploadLocation());
+    final AttachmentGenerator.Descriptor descriptor = tusAttachmentGenerator.generateAttachment(key, uploadLength);
+    return new AttachmentDescriptorV3(3, key, descriptor.headers(), descriptor.signedUploadLocation());
   }
 
 }

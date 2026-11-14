@@ -1,0 +1,126 @@
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.2
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    working_dir: /home/dynamodblocal
+    restart: unless-stopped
+    volumes:
+      - calling-dynamodb:/home/dynamodblocal/data
+    networks: [calling-private]
+
+  bootstrap:
+    build:
+      context: ./upstream/docker/bootstrap
+    restart: "no"
+    depends_on:
+      dynamodb:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local-only-not-a-cloud-credential
+      AWS_REGION: us-west-1
+    networks: [calling-private]
+
+  coturn:
+    image: coturn/coturn:4.18.0-r0
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --no-cli
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_STATIC_AUTH_SECRET:?Set TURN_STATIC_AUTH_SECRET; it must match the Signal Server turn.local.sharedSecret}
+      - --realm=${TURN_REALM:-signal.lan}
+      - --listening-ip=0.0.0.0
+      - --relay-ip=${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to the host LAN address}
+      - --external-ip=${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to the host LAN address}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+      - --no-loopback-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
+
+  calling-backend:
+    build:
+      context: ./upstream
+      dockerfile: backend/Dockerfile
+      args:
+        rust_flags: "-C target-cpu=native"
+    restart: unless-stopped
+    environment:
+      EXTERNAL_IP: ${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to this server's LAN address}
+      INTERNAL_IP: ${CALLING_MEDIA_IP:?Set CALLING_MEDIA_IP to this server's LAN address}
+    command:
+      - --ice-candidate-port
+      - "10000"
+      - --ice-candidate-port-tcp
+      - "9900"
+      - --inactivity-timeout-secs
+      - "60"
+      - --diagnostics-interval-secs
+      - "30"
+      - --approved-users-persistence-url
+      - http://calling-frontend:8100/v1/call-link-approvals
+      - --remove-call-records-base-url
+      - http://calling-frontend:8100/v2/conference
+    expose:
+      - "8080"
+    ports:
+      - "${CALLING_MEDIA_BIND_IP:-0.0.0.0}:10000:10000/udp"
+      - "${CALLING_MEDIA_BIND_IP:-0.0.0.0}:9900:9900/tcp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/v1/info >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [calling-private]
+
+  calling-frontend:
+    build:
+      context: ./upstream
+      dockerfile: frontend/Dockerfile
+      args:
+        rust_flags: "-C target-cpu=native"
+    restart: unless-stopped
+    environment:
+      REGION: lan
+      CALLING_AUTH_KEY: ${CALLING_AUTH_KEY:?Set CALLING_AUTH_KEY to a random 32-byte hex value}
+      ZKPARAMS: ${CALLING_ZK_PARAMS:?Set CALLING_ZK_PARAMS to the matching base64 GenericServerSecretParams}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      calling-backend:
+        condition: service_healthy
+    command:
+      - --version
+      - "1"
+      - --max-clients-per-call
+      - "50"
+      - --cleanup-interval-ms
+      - "10000"
+      - --regional-url-template
+      - "https://${CALLING_PUBLIC_HOST:?Set CALLING_PUBLIC_HOST to the LAN calling hostname}"
+      - --calling-server-url
+      - http://calling-backend:8080
+      - --storage-table
+      - Rooms
+      - --storage-region
+      - us-west-1
+      - --storage-endpoint
+      - http://dynamodb:8000
+      - --internal-api-port
+      - "8100"
+      - --enable-call-link-epochs
+      - "true"
+    ports:
+      - "127.0.0.1:${CALLING_FRONTEND_LOCAL_PORT:-8095}:8080"
+    networks: [calling-private]
+
+volumes:
+  calling-dynamodb:
+
+networks:
+  calling-private:
+    driver: bridge

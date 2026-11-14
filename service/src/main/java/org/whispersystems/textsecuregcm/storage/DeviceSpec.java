@@ -8,7 +8,6 @@ import java.util.Set;
 import org.signal.libsignal.protocol.IdentityKey;
 import org.whispersystems.textsecuregcm.auth.SaltedTokenHash;
 import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.util.EncryptDeviceCreationTimestampUtil;
 import org.whispersystems.textsecuregcm.util.Util;
 
@@ -20,8 +19,7 @@ public record DeviceSpec(
     DeviceIdentityInfo aciInfo,
     Optional<DeviceIdentityInfo> pniInfo,
     boolean fetchesMessages,
-    Optional<ApnRegistrationId> apnRegistrationId,
-    Optional<GcmRegistrationId> gcmRegistrationId) {
+    Optional<ApnRegistrationId> apnRegistrationId) {
 
   public Device toDevice(final byte deviceId, final Clock clock, final IdentityKey aciIdentityKey) {
     final long created = clock.millis();
@@ -41,7 +39,6 @@ public record DeviceSpec(
     device.setUserAgent(signalAgent());
 
     apnRegistrationId().ifPresent(apnRegistrationId -> device.setApnId(apnRegistrationId.apnRegistrationId()));
-    gcmRegistrationId().ifPresent(gcmRegistrationId -> device.setGcmId(gcmRegistrationId.gcmRegistrationId()));
 
     return device;
   }
@@ -65,14 +62,13 @@ public record DeviceSpec(
         && Objects.equals(password, that.password)
         && Objects.equals(signalAgent, that.signalAgent)
         && Objects.equals(capabilities, that.capabilities)
-        && Objects.equals(apnRegistrationId, that.apnRegistrationId)
-        && Objects.equals(gcmRegistrationId, that.gcmRegistrationId);
+        && Objects.equals(apnRegistrationId, that.apnRegistrationId);
   }
 
   @Override
   public int hashCode() {
     int result = Objects.hash(password, signalAgent, capabilities, aciInfo, pniInfo,
-        fetchesMessages, apnRegistrationId, gcmRegistrationId);
+        fetchesMessages, apnRegistrationId);
     result = 31 * result + Arrays.hashCode(deviceNameCiphertext);
     return result;
   }

@@ -88,12 +88,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.asn.AsnInfoProvider;
 import org.whispersystems.textsecuregcm.asn.AsnInfoProviderImpl;
-import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.CertificateGenerator;
 import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.LocalTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.TurnCredentialsProvider;
 import org.whispersystems.textsecuregcm.auth.DisconnectionRequestManager;
 import org.whispersystems.textsecuregcm.auth.ExternalServiceCredentialsGenerator;
 import org.whispersystems.textsecuregcm.auth.IdlePrimaryDeviceAuthenticatedWebSocketUpgradeFilter;
@@ -242,7 +243,7 @@ import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthController;
 import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.providers.MultiRecipientMessageProvider;
 import org.whispersystems.textsecuregcm.push.APNSender;
-import org.whispersystems.textsecuregcm.push.FcmSender;
+import org.whispersystems.textsecuregcm.push.NtfySender;
 import org.whispersystems.textsecuregcm.push.MessageSender;
 import org.whispersystems.textsecuregcm.push.ProvisioningManager;
 import org.whispersystems.textsecuregcm.push.PushNotificationManager;
@@ -646,8 +647,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     final BlockingQueue<Runnable> receiptSenderQueue = new LinkedBlockingQueue<>();
     Metrics.gaugeCollectionSize(name(getClass(), "receiptSenderQueue"), Collections.emptyList(), receiptSenderQueue);
-    final BlockingQueue<Runnable> fcmSenderQueue = new LinkedBlockingQueue<>();
-    Metrics.gaugeCollectionSize(name(getClass(), "fcmSenderQueue"), Collections.emptyList(), fcmSenderQueue);
     final BlockingQueue<Runnable> messageDeliveryQueue = new LinkedBlockingQueue<>();
     Metrics.gaugeCollectionSize(MetricsUtil.name(getClass(), "messageDeliveryQueue"), Collections.emptyList(),
         messageDeliveryQueue);
@@ -655,8 +654,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     ScheduledExecutorService recurringJobExecutor = ScheduledExecutorServiceBuilder.of(environment, "recurringJob").threads(6).build();
     ExecutorService apnSenderExecutor = ExecutorServiceBuilder.of(environment, "apnSender")
         .maxThreads(1).minThreads(1).build();
-    ExecutorService fcmSenderExecutor = ExecutorServiceBuilder.of(environment, "fcmSender")
-        .maxThreads(32).minThreads(32).workQueue(fcmSenderQueue).build();
     ExecutorService secureValueRecoveryServiceExecutor = ExecutorServiceBuilder.of(environment, "secureValueRecoveryService")
         .maxThreads(1).minThreads(1).build();
     ExecutorService storageServiceExecutor = ExecutorServiceBuilder.of(environment, "storageService")
@@ -829,11 +826,11 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         webAuthnCeremonyManager, totpManager);
     RemoteConfigsManager remoteConfigsManager = new RemoteConfigsManager(remoteConfigs, config.getRemoteConfigConfiguration().globalConfig());
     APNSender apnSender = new APNSender(apnSenderExecutor, Clock.systemUTC(), config.getApnConfiguration());
-    FcmSender fcmSender = new FcmSender(fcmSenderExecutor, config.getFcmConfiguration().credentials().value());
+    NtfySender ntfySender = new NtfySender(config.getNtfyConfiguration());
     PushNotificationScheduler pushNotificationScheduler = new PushNotificationScheduler(pushSchedulerCluster,
-        apnSender, fcmSender, accountsManager, 0, 0, retryExecutor);
+        apnSender, accountsManager, 0, 0, retryExecutor);
     PushNotificationManager pushNotificationManager =
-        new PushNotificationManager(accountsManager, apnSender, fcmSender, pushNotificationScheduler);
+        new PushNotificationManager(accountsManager, apnSender, ntfySender, pushNotificationScheduler);
     RateLimiters rateLimiters = RateLimiters.create(dynamicConfigurationManager, rateLimitersCluster, retryExecutor);
     ProvisioningManager provisioningManager = new ProvisioningManager(pubsubClient);
     IssuedReceiptsManager issuedReceiptsManager = new IssuedReceiptsManager(
@@ -864,22 +861,28 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     final MessageSender messageSender = new MessageSender(messagesManager, pushNotificationManager, dynamicConfigurationManager);
     final ReceiptSender receiptSender = new ReceiptSender(accountsManager, messageSender, receiptSenderExecutor);
-    final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager = new CloudflareTurnCredentialsManager(
-        config.getTurnConfiguration().cloudflare().apiToken().value(),
-        config.getTurnConfiguration().cloudflare().endpoint(),
-        config.getTurnConfiguration().cloudflare().requestedCredentialTtl(),
-        config.getTurnConfiguration().cloudflare().clientCredentialTtl(),
-        config.getTurnConfiguration().cloudflare().urls(),
-        config.getTurnConfiguration().cloudflare().urlsWithIps(),
-        config.getTurnConfiguration().cloudflare().hostname(),
-        config.getTurnConfiguration().cloudflare().numHttpClients(),
-        config.getTurnConfiguration().cloudflare().circuitBreakerConfigurationName(),
-        cloudflareTurnHttpExecutor,
-        config.getTurnConfiguration().cloudflare().retryConfigurationName(),
-        cloudflareTurnRetryExecutor,
-        cloudflareDnsResolver,
-        dynamicConfigurationManager,
-        experimentEnrollmentManager);
+    final TurnCredentialsProvider turnCredentialsProvider;
+    if (config.getTurnConfiguration().local() != null) {
+      turnCredentialsProvider = new LocalTurnCredentialsManager(config.getTurnConfiguration().local(), clock);
+    } else {
+      final var cloudflareConfiguration = config.getTurnConfiguration().cloudflare();
+      turnCredentialsProvider = new CloudflareTurnCredentialsManager(
+          cloudflareConfiguration.apiToken().value(),
+          cloudflareConfiguration.endpoint(),
+          cloudflareConfiguration.requestedCredentialTtl(),
+          cloudflareConfiguration.clientCredentialTtl(),
+          cloudflareConfiguration.urls(),
+          cloudflareConfiguration.urlsWithIps(),
+          cloudflareConfiguration.hostname(),
+          cloudflareConfiguration.numHttpClients(),
+          cloudflareConfiguration.circuitBreakerConfigurationName(),
+          cloudflareTurnHttpExecutor,
+          cloudflareConfiguration.retryConfigurationName(),
+          cloudflareTurnRetryExecutor,
+          cloudflareDnsResolver,
+          dynamicConfigurationManager,
+          experimentEnrollmentManager);
+    }
 
     final CardinalityEstimator messageByteLimitCardinalityEstimator = new CardinalityEstimator(
         rateLimitersCluster,
@@ -938,12 +941,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(clientReleaseManager);
     environment.lifecycle().manage(virtualThreadPinEventMonitor);
     environment.lifecycle().manage(accountsManager);
-
-    final GcsAttachmentGenerator gcsAttachmentGenerator = new GcsAttachmentGenerator(
-        config.getGcpAttachmentsConfiguration().domain(),
-        config.getGcpAttachmentsConfiguration().email(),
-        config.getGcpAttachmentsConfiguration().pathPrefix(),
-        config.getGcpAttachmentsConfiguration().rsaSigningKey().value());
 
     final PostPolicyGenerator profileCdnPolicyGenerator = new PostPolicyGenerator(config.getCdnConfiguration().region(),
         config.getCdnConfiguration().bucket(),
@@ -1135,15 +1132,14 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     final List<ServerServiceDefinition> authenticatedServices = Stream.of(
             new AccountsGrpcService(accountsManager, rateLimiters, usernameHashZkProofVerifier,
                 phoneNumberRecoveryPasswordsManager, Clock.systemUTC(), changeNumberManager),
-            new CallingGrpcService(cloudflareTurnCredentialsManager, rateLimiters),
+            new CallingGrpcService(turnCredentialsProvider, rateLimiters),
             new CredentialsGrpcService(accountsManager, certificateGenerator, zkAuthOperations, callingGenericZkSecretParams, rateLimiters, Clock.systemUTC(), ExternalServiceDefinitions.createExternalServiceList(config, Clock.systemUTC())),
             new KeysGrpcService(accountsManager, keysManager, rateLimiters),
             new ProfileGrpcService(clock, accountsManager, profilesManager, asnInfoProviderSupplier, dynamicConfigurationManager, config.getBadges(), profileCdnPolicyGenerator, chatGenericZkSecretParams, profileBadgeConverter, rateLimiters),
             new MessagesGrpcService(accountsManager, reportMessageManager, phoneNumberIdentifiers, rateLimiters, messageSender, messageByteLimitCardinalityEstimator, spamChecker, messageDispatcher, Clock.systemUTC()),
             new BackupsGrpcService(accountsManager, backupAuthManager, backupMetrics),
             new DevicesGrpcService(accountsManager),
-            new AttachmentsGrpcService(experimentEnrollmentManager, rateLimiters, gcsAttachmentGenerator,
-                tusAttachmentGenerator, stickerPolicyGenerator,
+            new AttachmentsGrpcService(rateLimiters, tusAttachmentGenerator, stickerPolicyGenerator,
                 config.getAttachments().maxAttachmentUploadSizeInBytes(), Clock.systemUTC()),
             new PaymentsGrpcService(currencyManager),
             new ChallengeGrpcService(accountsManager, rateLimitChallengeManager, challengeConstraintChecker),
@@ -1307,10 +1303,10 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         new AccountController(accountsManager, rateLimiters, phoneNumberRecoveryPasswordsManager,
             usernameHashZkProofVerifier),
         new AccountControllerV2(accountsManager, changeNumberManager),
-        new AttachmentControllerV4(rateLimiters, gcsAttachmentGenerator, tusAttachmentGenerator,
-            experimentEnrollmentManager, config.getAttachments().maxAttachmentUploadSizeInBytes()),
+        new AttachmentControllerV4(rateLimiters, tusAttachmentGenerator,
+            config.getAttachments().maxAttachmentUploadSizeInBytes()),
         new ArchiveController(accountsManager, backupAuthManager, backupManager, backupMetrics, config.getAttachments().maxAttachmentUploadSizeInBytes(), config.getAttachments().maxMessageBackupUploadSizeInBytes()),
-        new CallRoutingControllerV2(rateLimiters, cloudflareTurnCredentialsManager),
+        new CallRoutingControllerV2(rateLimiters, turnCredentialsProvider),
         new CallLinkController(rateLimiters, callingGenericZkSecretParams, callingPreV101GenericZkSecretParams),
         new CallQualitySurveyController(callQualitySurveyManager),
         new CertificateController(accountsManager, certificateGenerator, zkAuthOperations, callingGenericZkSecretParams, callingPreV101GenericZkSecretParams, clock),

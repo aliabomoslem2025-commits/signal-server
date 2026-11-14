@@ -10,6 +10,7 @@ import io.grpc.StatusRuntimeException;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +38,7 @@ public class PhoneVerificationTokenManager {
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
   private final LocalDeviceAuthStore localDeviceAuthStore;
+  private final Optional<LocalAuthTicketClient> localAuthTicketClient;
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
       @Nullable final RegistrationServiceClient registrationServiceClient,
@@ -56,6 +58,7 @@ public class PhoneVerificationTokenManager {
     this.phoneNumberRecoveryPasswordsManager = phoneNumberRecoveryPasswordsManager;
     this.registrationRecoveryChecker = registrationRecoveryChecker;
     this.localDeviceAuthStore = localDeviceAuthStore;
+    this.localAuthTicketClient = LocalAuthTicketClient.fromEnvironment();
   }
 
   /**
@@ -88,6 +91,17 @@ public class PhoneVerificationTokenManager {
       throw new IllegalArgumentException("Exactly one of session ID or recovery password must non-null");
     }
 
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      final boolean hasSidecarSession = LocalAuthTicketClient.isLocalAuthSession(sessionId);
+      final boolean hasNativeLocalSession = sessionId != null
+          && localDeviceAuthStore != null
+          && localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId);
+      if (!hasSidecarSession && !hasNativeLocalSession) {
+        throw new InvalidRegistrationSessionException(
+            "SMS and phone-call verification are disabled; a LAN device-authentication session is required");
+      }
+    }
+
     final PhoneVerificationRequest.VerificationType verificationType = sessionId != null
         ? PhoneVerificationRequest.VerificationType.SESSION
         : PhoneVerificationRequest.VerificationType.RECOVERY_PASSWORD;
@@ -102,6 +116,18 @@ public class PhoneVerificationTokenManager {
 
   private void verifyBySessionId(final String number, final byte[] sessionId)
       throws UnverifiedRegistrationSessionException, InvalidRegistrationSessionException, IOException {
+    if (LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
+      final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
+          () -> new InvalidRegistrationSessionException("LAN sidecar authentication is not configured"));
+      try {
+        client.validate(number, sessionId);
+        return;
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("local authentication service interrupted", e);
+      }
+    }
+
     if (localDeviceAuthStore != null) {
       // In a local deployment, only sessions created and verified by the LAN device-auth flow are valid.
       // Never fall back to the upstream registration service or its SMS/voice verification path.
@@ -134,6 +160,23 @@ public class PhoneVerificationTokenManager {
       logger.error("Registration service failure", e);
       throw new IOException("Registration service failure", e);
     }
+  }
+
+  public boolean isLocalAuthSession(final byte[] sessionId) {
+    return LocalAuthTicketClient.isLocalAuthSession(sessionId);
+  }
+
+  /**
+   * Redeem a sidecar ticket immediately before account creation so a ticket cannot be replayed.
+   */
+  public void consumeLocalAuthSession(final String number, final byte[] sessionId)
+      throws InterruptedException, InvalidRegistrationSessionException, IOException {
+    if (!LocalAuthTicketClient.isLocalAuthSession(sessionId)) {
+      return;
+    }
+    final LocalAuthTicketClient client = localAuthTicketClient.orElseThrow(
+        () -> new InvalidRegistrationSessionException("LAN sidecar authentication is not configured"));
+    client.consume(number, sessionId);
   }
 
   private void verifyByRecoveryPassword(

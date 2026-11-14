@@ -53,7 +53,6 @@ import org.whispersystems.textsecuregcm.auth.DisconnectionRequestManager;
 import org.whispersystems.textsecuregcm.entities.AccountAttributes;
 import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
 import org.whispersystems.textsecuregcm.entities.ECSignedPreKey;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.entities.KEMSignedPreKey;
 import org.whispersystems.textsecuregcm.purchases.ReceiptLevel;
 import org.whispersystems.textsecuregcm.redis.FaultTolerantRedisClient;
@@ -97,7 +96,7 @@ public class AccountCreationDeletionIntegrationTest {
   private PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private DisconnectionRequestManager disconnectionRequestManager;
 
-  record DeliveryChannels(boolean fetchesMessages, String apnsToken, String fcmToken) {}
+  record DeliveryChannels(boolean fetchesMessages, String apnsToken) {}
 
   @BeforeEach
   void setUp() {
@@ -230,10 +229,6 @@ public class AccountCreationDeletionIntegrationTest {
             ? Optional.of(new ApnRegistrationId(deliveryChannels.apnsToken()))
             : Optional.empty();
 
-    final Optional<GcmRegistrationId> maybeGcmRegistrationId = deliveryChannels.fcmToken() != null
-        ? Optional.of(new GcmRegistrationId(deliveryChannels.fcmToken()))
-        : Optional.empty();
-
     final Account account = accountsManager.create(number,
         accountAttributes,
         new IdentityKey(aciKeyPair.getPublicKey()),
@@ -246,8 +241,7 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
             deliveryChannels.fetchesMessages(),
-            maybeApnRegistrationId,
-            maybeGcmRegistrationId),
+            maybeApnRegistrationId),
         null);
 
     assertExpectedStoredAccount(account,
@@ -262,7 +256,6 @@ public class AccountCreationDeletionIntegrationTest {
         deviceCapabilities,
         Collections.emptyList(),
         maybeApnRegistrationId,
-        maybeGcmRegistrationId,
         Optional.of(registrationLockSecret),
         aciSignedPreKey,
         Optional.of(pniSignedPreKey),
@@ -306,10 +299,6 @@ public class AccountCreationDeletionIntegrationTest {
             ? Optional.of(new ApnRegistrationId(deliveryChannels.apnsToken()))
             : Optional.empty();
 
-    final Optional<GcmRegistrationId> maybeGcmRegistrationId = deliveryChannels.fcmToken() != null
-        ? Optional.of(new GcmRegistrationId(deliveryChannels.fcmToken()))
-        : Optional.empty();
-
     final Account account = accountsManager.create(accountAttributes,
         new IdentityKey(aciKeyPair.getPublicKey()),
         receiptPresentation(CLOCK.instant().plus(Duration.ofDays(30)), ReceiptLevel.LOGIN.getValue()),
@@ -321,8 +310,7 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.empty(),
             deliveryChannels.fetchesMessages(),
-            maybeApnRegistrationId,
-            maybeGcmRegistrationId),
+            maybeApnRegistrationId),
         null);
 
     assertExpectedStoredAccount(account,
@@ -337,7 +325,6 @@ public class AccountCreationDeletionIntegrationTest {
         deviceCapabilities,
         Collections.emptyList(),
         maybeApnRegistrationId,
-        maybeGcmRegistrationId,
         Optional.empty(),
         aciSignedPreKey,
         Optional.empty(),
@@ -354,10 +341,10 @@ public class AccountCreationDeletionIntegrationTest {
 
   private static List<DeliveryChannels> deliveryChannels() {
     return List.of(
-        new DeliveryChannels(true, null, null),
-        new DeliveryChannels(false, "apns-token", null),
-        new DeliveryChannels(false, "apns-token", null),
-        new DeliveryChannels(false, null, "fcm-token"));
+        new DeliveryChannels(true, null),
+        new DeliveryChannels(false, "apns-token"),
+        new DeliveryChannels(false, "apns-token"),
+        new DeliveryChannels(true, null));
   }
 
   @SuppressWarnings("unused")
@@ -406,7 +393,6 @@ public class AccountCreationDeletionIntegrationTest {
               new DeviceIdentityInfo(1, aciSignedPreKey, aciPqLastResortPreKey),
               Optional.of(new DeviceIdentityInfo(2, pniSignedPreKey, pniPqLastResortPreKey)),
               true,
-              Optional.empty(),
               Optional.empty()),
           null);
 
@@ -446,10 +432,6 @@ public class AccountCreationDeletionIntegrationTest {
             ? Optional.of(new ApnRegistrationId(deliveryChannels.apnsToken()))
             : Optional.empty();
 
-    final Optional<GcmRegistrationId> maybeGcmRegistrationId = deliveryChannels.fcmToken() != null
-        ? Optional.of(new GcmRegistrationId(deliveryChannels.fcmToken()))
-        : Optional.empty();
-
     final Account reregisteredAccount = accountsManager.create(number,
         accountAttributes,
         new IdentityKey(aciKeyPair.getPublicKey()),
@@ -461,8 +443,7 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
             accountAttributes.getFetchesMessages(),
-            maybeApnRegistrationId,
-            maybeGcmRegistrationId),
+            maybeApnRegistrationId),
         null);
 
     assertExpectedStoredAccount(reregisteredAccount,
@@ -477,7 +458,6 @@ public class AccountCreationDeletionIntegrationTest {
         deviceCapabilities,
         existingAccountBadges,
         maybeApnRegistrationId,
-        maybeGcmRegistrationId,
         Optional.of(registrationLockSecret),
         aciSignedPreKey,
         Optional.of(pniSignedPreKey),
@@ -534,7 +514,6 @@ public class AccountCreationDeletionIntegrationTest {
               new DeviceIdentityInfo(1, aciSignedPreKey, aciPqLastResortPreKey),
               Optional.of(new DeviceIdentityInfo(2, pniSignedPreKey, pniPqLastResortPreKey)),
               true,
-              Optional.empty(),
               Optional.empty()),
           null)
           : accountsManager.create(new AccountAttributes(true, 1, null, "name".getBytes(StandardCharsets.UTF_8), null, false, Set.of(),
@@ -548,7 +527,6 @@ public class AccountCreationDeletionIntegrationTest {
                   new DeviceIdentityInfo(1, aciSignedPreKey, aciPqLastResortPreKey),
                   Optional.empty(),
                   true,
-                  Optional.empty(),
                   Optional.empty()),
               null);
 
@@ -578,7 +556,6 @@ public class AccountCreationDeletionIntegrationTest {
         new DeviceIdentityInfo(aciRegistrationId, aciSignedPreKey, aciPqLastResortPreKey),
         hasE164 ? Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)) : Optional.empty(),
         true,
-        Optional.empty(),
         Optional.empty());
 
     final Account existingAccount = accountsManager.getByAccountIdentifier(existingAccountIdentifier).orElseThrow();
@@ -604,7 +581,7 @@ public class AccountCreationDeletionIntegrationTest {
     assertEquals(hasE164 ? Optional.of(pniRegistrationId) : Optional.empty(), reclaimedPrimaryDevice.getPhoneNumberIdentityRegistrationId());
     assertTrue(reclaimedPrimaryDevice.getFetchesMessages());
     assertTrue(StringUtils.isBlank(reclaimedPrimaryDevice.getApnId()));
-    assertTrue(StringUtils.isBlank(reclaimedPrimaryDevice.getGcmId()));
+    assertTrue(reclaimedPrimaryDevice.getNtfyTopic() == null);
 
     assertTrue(reclaimedAccount.getAccountRecoveryPassword().orElseThrow().verify(HexFormat.of().formatHex(updatedRecoveryPassword)));
     assertTrue(reclaimedPrimaryDevice.getAuthTokenHash().verify(primaryDeviceSpec.password()));
@@ -613,14 +590,13 @@ public class AccountCreationDeletionIntegrationTest {
         hasE164 ? Optional.of(number) : Optional.empty(),
         primaryDeviceSpec.password(),
         primaryDeviceSpec.signalAgent(),
-        new DeliveryChannels(true, null, null),
+        new DeliveryChannels(true, null),
         aciRegistrationId,
         hasE164 ? Optional.of(pniRegistrationId) : Optional.empty(),
         primaryDeviceSpec.deviceNameCiphertext(),
         hasE164,
         Collections.emptySet(),
         existingAccountBadges,
-        Optional.empty(),
         Optional.empty(),
         Optional.empty(),
         aciSignedPreKey,
@@ -678,7 +654,6 @@ public class AccountCreationDeletionIntegrationTest {
               new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
               Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
               true,
-              Optional.empty(),
               Optional.empty()),
           null);
       assertTrue(phoneNumberRecoveryPasswordsManager.verify(account.getPhoneNumberIdentifier().orElseThrow(),
@@ -695,7 +670,6 @@ public class AccountCreationDeletionIntegrationTest {
               new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
               Optional.empty(),
               true,
-              Optional.empty(),
               Optional.empty()),
           null);
     }
@@ -728,7 +702,7 @@ public class AccountCreationDeletionIntegrationTest {
     final byte[] recoveryPassword = TestRandomUtil.nextBytes(32);
     final ECKeyPair aciKeyPair = ECKeyPair.generate();
     final IdentityKey aciIdentityKey = new IdentityKey(aciKeyPair.getPublicKey());
-    final DeliveryChannels deliveryChannels = new DeliveryChannels(false, "apns-token", null);
+    final DeliveryChannels deliveryChannels = new DeliveryChannels(false, "apns-token");
 
     final UUID existingAccountUuid;
     {
@@ -744,7 +718,6 @@ public class AccountCreationDeletionIntegrationTest {
               new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
               Optional.empty(),
               true,
-              Optional.empty(),
               Optional.empty()),
           null);
 
@@ -773,10 +746,6 @@ public class AccountCreationDeletionIntegrationTest {
             ? Optional.of(new ApnRegistrationId(deliveryChannels.apnsToken()))
             : Optional.empty();
 
-    final Optional<GcmRegistrationId> maybeGcmRegistrationId = deliveryChannels.fcmToken() != null
-        ? Optional.of(new GcmRegistrationId(deliveryChannels.fcmToken()))
-        : Optional.empty();
-
     final Account retriedAccount = accountsManager.create(accountAttributes,
         aciIdentityKey,
         receiptPresentation(receiptSerial,  CLOCK.instant().plus(Duration.ofDays(30)), ReceiptLevel.LOGIN.getValue()),
@@ -787,8 +756,7 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.empty(),
             accountAttributes.getFetchesMessages(),
-            maybeApnRegistrationId,
-            maybeGcmRegistrationId),
+            maybeApnRegistrationId),
         null);
 
     assertExpectedStoredAccount(retriedAccount,
@@ -803,7 +771,6 @@ public class AccountCreationDeletionIntegrationTest {
         deviceCapabilities,
         Collections.emptyList(),
         maybeApnRegistrationId,
-        maybeGcmRegistrationId,
         Optional.empty(),
         aciSignedPreKey,
         Optional.empty(),
@@ -841,7 +808,6 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.empty(),
             true,
-            Optional.empty(),
             Optional.empty()),
         null);
 
@@ -859,7 +825,6 @@ public class AccountCreationDeletionIntegrationTest {
             new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.empty(),
             true,
-            Optional.empty(),
             Optional.empty()),
         null));
   }
@@ -877,7 +842,6 @@ public class AccountCreationDeletionIntegrationTest {
       final Set<DeviceCapability> deviceCapabilities,
       final List<AccountBadge> badges,
       final Optional<ApnRegistrationId> maybeApnRegistrationId,
-      final Optional<GcmRegistrationId> maybeGcmRegistrationId,
       final Optional<String> registrationLockSecret,
       final ECSignedPreKey aciSignedPreKey,
       final Optional<ECSignedPreKey> pniSignedPreKey,
@@ -899,10 +863,6 @@ public class AccountCreationDeletionIntegrationTest {
     maybeApnRegistrationId.ifPresentOrElse(
         apnRegistrationId -> assertEquals(apnRegistrationId.apnRegistrationId(), primaryDevice.getApnId()),
         () -> assertNull(primaryDevice.getApnId()));
-
-    maybeGcmRegistrationId.ifPresentOrElse(
-        _ -> assertEquals(deliveryChannels.fcmToken(), primaryDevice.getGcmId()),
-        () -> assertNull(primaryDevice.getGcmId()));
 
     registrationLockSecret.ifPresent(regLockSecret -> assertTrue(account.getRegistrationLock().verify(regLockSecret)));
     assertTrue(primaryDevice.getAuthTokenHash().verify(password));

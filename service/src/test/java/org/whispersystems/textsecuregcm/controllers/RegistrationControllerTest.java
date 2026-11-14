@@ -93,7 +93,6 @@ import org.whispersystems.textsecuregcm.entities.AccountIdentityResponse;
 import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
 import org.whispersystems.textsecuregcm.entities.DeviceActivationRequest;
 import org.whispersystems.textsecuregcm.entities.ECSignedPreKey;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.entities.KEMSignedPreKey;
 import org.whispersystems.textsecuregcm.entities.PhoneVerificationRequest;
 import org.whispersystems.textsecuregcm.entities.RegistrationRequest;
@@ -534,8 +533,7 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.of(new ApnRegistrationId("apns-token")),
-                    Optional.empty()))),
+                    Optional.of(new ApnRegistrationId("apns-token"))))),
 
         Arguments.argumentSet("\"Fetches messages\" is true, but an FCM (GCM) token is provided",
             new RegistrationRequest("session-id",
@@ -551,8 +549,7 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
-                    Optional.of(new GcmRegistrationId("gcm-token"))))),
+                    Optional.empty()))),
 
         Arguments.argumentSet("\"Fetches messages\" is false, but multiple types of push tokens are provided",
             new RegistrationRequest("session-id",
@@ -568,8 +565,7 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.of(new ApnRegistrationId("apns-token")),
-                    Optional.of(new GcmRegistrationId("gcm-token")))))
+                    Optional.of(new ApnRegistrationId("apns-token")))))
     );
   }
 
@@ -624,7 +620,6 @@ class RegistrationControllerTest {
                     null,
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty()))),
 
         Arguments.argumentSet("Signed ACI EC pre-key is missing",
@@ -641,7 +636,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty()))),
 
         Arguments.argumentSet("Signed PNI KEM pre-key is missing",
@@ -658,7 +652,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     null,
-                    Optional.empty(),
                     Optional.empty()))),
 
         Arguments.argumentSet("Signed ACI KEM pre-key is missing",
@@ -675,7 +668,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     null,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty()))),
 
         Arguments.argumentSet("All signed pre-keys are present, but ACI identity key is missing",
@@ -692,7 +684,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty()))),
 
         Arguments.argumentSet("All signed pre-keys are present, but PNI identity key is missing",
@@ -709,7 +700,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())))
     );
   }
@@ -790,7 +780,6 @@ class RegistrationControllerTest {
             Optional.empty(),
             aciPqLastResortPreKey,
             Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final UUID accountIdentifier = UUID.randomUUID();
@@ -828,7 +817,6 @@ class RegistrationControllerTest {
             new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
             Optional.empty(),
             true,
-            Optional.empty(),
             Optional.empty())),
         any());
 
@@ -867,7 +855,6 @@ class RegistrationControllerTest {
         new DeviceActivationRequest(aciSignedPreKey,
             Optional.empty(),
             aciPqLastResortPreKey,
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
@@ -912,7 +899,6 @@ class RegistrationControllerTest {
         new DeviceActivationRequest(aciSignedPreKey,
             Optional.empty(),
             aciPqLastResortPreKey,
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
@@ -977,7 +963,6 @@ class RegistrationControllerTest {
             Optional.empty(),
             aciPqLastResortPreKey,
             Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final Invocation.Builder request = resources.getJerseyTest()
@@ -1022,7 +1007,6 @@ class RegistrationControllerTest {
             Optional.empty(),
             aciPqLastResortPreKey,
             Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final Invocation.Builder request = resources.getJerseyTest()
@@ -1061,7 +1045,6 @@ class RegistrationControllerTest {
         new DeviceActivationRequest(KeysHelper.signedECPreKey(1, aciIdentityKeyPair),
             Optional.empty(),
             KeysHelper.signedKEMPreKey(3, aciIdentityKeyPair),
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
@@ -1112,7 +1095,6 @@ class RegistrationControllerTest {
             Optional.of(pniSignedPreKey),
             aciPqLastResortPreKey,
             Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final Invocation.Builder request = resources.getJerseyTest()
@@ -1148,7 +1130,6 @@ class RegistrationControllerTest {
         new DeviceActivationRequest(KeysHelper.signedECPreKey(1, aciIdentityKeyPair),
             Optional.empty(),
             KeysHelper.signedKEMPreKey(3, aciIdentityKeyPair),
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
@@ -1198,7 +1179,6 @@ class RegistrationControllerTest {
         new DeviceActivationRequest(aciSignedPreKey,
             Optional.empty(),
             aciPqLastResortPreKey,
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
@@ -1278,7 +1258,6 @@ class RegistrationControllerTest {
             Optional.of(pniSignedPreKey),
             aciPqLastResortPreKey,
             Optional.of(pniPqLastResortPreKey),
-            Optional.empty(),
             Optional.empty()));
 
     final Invocation.Builder request = resources.getJerseyTest()
@@ -1308,7 +1287,6 @@ class RegistrationControllerTest {
                 ? Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey))
                 : Optional.empty(),
             true,
-            Optional.empty(),
             Optional.empty())),
         any()
     );
@@ -1407,7 +1385,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             422),
 
@@ -1427,7 +1404,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             400),
 
@@ -1447,7 +1423,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             400),
 
@@ -1467,7 +1442,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             422),
 
@@ -1487,7 +1461,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             403),
 
@@ -1507,7 +1480,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             403),
 
@@ -1527,7 +1499,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             409)
     );
@@ -1619,7 +1590,6 @@ class RegistrationControllerTest {
             .setUnidentifiedAccessKey(TestRandomUtil.nextBytes(16));
 
     final String apnsToken = "apns-token";
-    final String gcmToken = "gcm-token";
 
     return List.of(
         Arguments.argumentSet("Fetches messages; no push tokens",
@@ -1636,7 +1606,6 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
                     Optional.empty())),
             aciIdentityKey,
             pniIdentityKey,
@@ -1648,9 +1617,7 @@ class RegistrationControllerTest {
                 new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
                 Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
                 true,
-                Optional.empty(),
-                Optional.empty()
-            )),
+                Optional.empty())),
 
         Arguments.argumentSet("Has APNs tokens",
             new RegistrationRequest("session-id",
@@ -1666,8 +1633,7 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.of(new ApnRegistrationId(apnsToken)),
-                    Optional.empty())),
+                    Optional.of(new ApnRegistrationId(apnsToken)))),
             aciIdentityKey,
             pniIdentityKey,
             new DeviceSpec(
@@ -1678,8 +1644,7 @@ class RegistrationControllerTest {
                 new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
                 Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
                 false,
-                Optional.of(new ApnRegistrationId(apnsToken)),
-                Optional.empty())),
+                Optional.of(new ApnRegistrationId(apnsToken)))),
 
         Arguments.argumentSet("Has GCM token",
             new RegistrationRequest("session-id",
@@ -1695,8 +1660,7 @@ class RegistrationControllerTest {
                     Optional.of(pniSignedPreKey),
                     aciPqLastResortPreKey,
                     Optional.of(pniPqLastResortPreKey),
-                    Optional.empty(),
-                    Optional.of(new GcmRegistrationId(gcmToken)))),
+                    Optional.empty())),
             aciIdentityKey,
             pniIdentityKey,
             new DeviceSpec(
@@ -1707,8 +1671,7 @@ class RegistrationControllerTest {
                 new DeviceIdentityInfo(registrationId, aciSignedPreKey, aciPqLastResortPreKey),
                 Optional.of(new DeviceIdentityInfo(pniRegistrationId, pniSignedPreKey, pniPqLastResortPreKey)),
                 false,
-                Optional.empty(),
-                Optional.of(new GcmRegistrationId(gcmToken))))
+                Optional.empty()))
     );
   }
 
@@ -1745,7 +1708,6 @@ class RegistrationControllerTest {
             Optional.of(KeysHelper.signedECPreKey(2, pniIdentityKeyPair)),
             KeysHelper.signedKEMPreKey(3, aciIdentityKeyPair),
             Optional.of(KeysHelper.signedKEMPreKey(4, pniIdentityKeyPair)),
-            Optional.empty(),
             Optional.empty()));
   }
 

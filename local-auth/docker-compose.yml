@@ -1,0 +1,41 @@
+services:
+  local-auth-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: local_auth
+      POSTGRES_USER: local_auth
+      POSTGRES_PASSWORD: ${LOCAL_AUTH_DB_PASSWORD:?set LOCAL_AUTH_DB_PASSWORD}
+    volumes:
+      - local-auth-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U local_auth -d local_auth"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private]
+
+  local-auth:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      local-auth-db:
+        condition: service_healthy
+    environment:
+      LISTEN_ADDR: ":8090"
+      DATABASE_URL: "postgres://local_auth:${LOCAL_AUTH_DB_PASSWORD}@local-auth-db:5432/local_auth?sslmode=disable"
+      ADMIN_TOKEN: ${LOCAL_AUTH_ADMIN_TOKEN:?set LOCAL_AUTH_ADMIN_TOKEN}
+      INTERNAL_TOKEN: ${LOCAL_AUTH_INTERNAL_TOKEN:?set LOCAL_AUTH_INTERNAL_TOKEN}
+      TICKET_HMAC_SECRET: ${LOCAL_AUTH_TICKET_HMAC_SECRET:?set LOCAL_AUTH_TICKET_HMAC_SECRET}
+      ANDROID_ID_HASH_SECRET: ${LOCAL_AUTH_ANDROID_ID_HASH_SECRET:?set LOCAL_AUTH_ANDROID_ID_HASH_SECRET}
+      ALLOWED_ORIGINS: ${LOCAL_AUTH_ALLOWED_ORIGINS:-}
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks: [private]
+
+volumes:
+  local-auth-db:
+
+networks:
+  private:
+    internal: true

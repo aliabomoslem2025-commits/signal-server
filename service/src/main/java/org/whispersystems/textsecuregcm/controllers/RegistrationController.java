@@ -54,6 +54,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.auth.BasicAuthorizationHeader;
 import org.whispersystems.textsecuregcm.auth.InvalidRegistrationSessionException;
+import org.whispersystems.textsecuregcm.auth.LocalAuthTicketClient;
 import org.whispersystems.textsecuregcm.auth.MfaFailureException;
 import org.whispersystems.textsecuregcm.auth.PhoneVerificationTokenManager;
 import org.whispersystems.textsecuregcm.auth.RecoveryPasswordVerificationFailedException;
@@ -289,6 +290,24 @@ public class RegistrationController {
       existingAccount = Optional.of(checkMfa(existingAccount.get(), registrationRequest.webAuthnResponse(), registrationRequest.totp()));
     }
 
+    final byte[] decodedRegistrationSessionId = StringUtils.isNotBlank(registrationRequest.sessionId())
+        ? registrationRequest.decodeSessionId()
+        : null;
+    final boolean localAuthSession = phoneVerificationTokenManager.isLocalAuthSession(decodedRegistrationSessionId);
+    if (localAuthSession) {
+      try {
+        // Redeem before creating the account: a replay or a revoked device must never leave a partially-created account.
+        phoneVerificationTokenManager.consumeLocalAuthSession(number, decodedRegistrationSessionId);
+      } catch (final InvalidRegistrationSessionException e) {
+        throw new BadRequestException(e.getMessage());
+      } catch (final IOException e) {
+        throw new ServiceUnavailableException("local authentication service unavailable");
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new ServiceUnavailableException("local authentication service interrupted");
+      }
+    }
+
     final Account account = accounts.create(number,
         registrationRequest.accountAttributes(),
         registrationRequest.aciIdentityKey(),
@@ -308,11 +327,10 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().pniSignedPreKey().get(),
                 registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().get())),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
 
-    if (verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
+    if (!localAuthSession && verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
       try {
         registrationFraudChecker.handleVerificationCompleted(registrationRequest.sessionId(), account);
       } catch (final Exception e) {
@@ -342,6 +360,13 @@ public class RegistrationController {
       final RegistrationRequest registrationRequest,
       final String userAgent,
       final String signalAgent) {
+
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      throw new WebApplicationException(Response.status(Response.Status.GONE)
+          .entity("Phone-less registration is disabled in LAN-only mode.")
+          .type(MediaType.TEXT_PLAIN)
+          .build());
+    }
 
     if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
       throw new BadRequestException("login purchases are not enabled");
@@ -388,8 +413,7 @@ public class RegistrationController {
                   .aciSignedPreKey(), registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
               Optional.empty(),
               registrationRequest.accountAttributes().getFetchesMessages(),
-              registrationRequest.deviceActivationRequest().apnToken(),
-              registrationRequest.deviceActivationRequest().gcmToken()),
+              registrationRequest.deviceActivationRequest().apnToken()),
           userAgent);
 
       Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
@@ -408,6 +432,13 @@ public class RegistrationController {
       final RegistrationRequest registrationRequest,
       final String userAgent,
       final String signalAgent) throws RegistrationLockFailureException, RateLimitExceededException, MfaFailureException {
+
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      throw new WebApplicationException(Response.status(Response.Status.GONE)
+          .entity("Recovery-password account recovery is disabled in LAN-only mode. Re-authenticate with an enrolled device.")
+          .type(MediaType.TEXT_PLAIN)
+          .build());
+    }
 
     if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
       throw new BadRequestException("login purchases are not enabled");
@@ -478,8 +509,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
             Optional.empty(),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
   }
 
@@ -516,8 +546,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().pniSignedPreKey().orElseThrow(),
                 registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().orElseThrow())),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
   }
 

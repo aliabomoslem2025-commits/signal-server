@@ -71,7 +71,6 @@ import org.whispersystems.textsecuregcm.entities.ConfirmUsernameHashRequest;
 import org.whispersystems.textsecuregcm.entities.DeviceName;
 import org.whispersystems.textsecuregcm.entities.EncryptedUsername;
 import org.whispersystems.textsecuregcm.entities.Entitlements;
-import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.entities.RegistrationLock;
 import org.whispersystems.textsecuregcm.entities.ReserveUsernameHashRequest;
 import org.whispersystems.textsecuregcm.entities.ReserveUsernameHashResponse;
@@ -298,49 +297,6 @@ class AccountControllerTest {
         .put(Entity.json(new RegistrationLock("313")))) {
 
       assertThat(response.getStatus()).isEqualTo(422);
-    }
-  }
-
-  @Test
-  void testSetGcmId() {
-    try (final Response response = resources.getJerseyTest()
-        .target("/v1/accounts/gcm/")
-        .request()
-        .header(HttpHeaders.AUTHORIZATION,
-            AuthHelper.getAuthHeader(AuthHelper.VALID_UUID_3, AuthHelper.VALID_PASSWORD_3_PRIMARY))
-        .put(Entity.json(new GcmRegistrationId("z000")))) {
-
-      assertThat(response.getStatus()).isEqualTo(204);
-
-      verify(AuthHelper.VALID_DEVICE_3_PRIMARY, times(1)).setGcmId(eq("z000"));
-      verify(accountsManager, times(1)).updateDevice(eq(AuthHelper.VALID_UUID_3), anyByte(), any());
-    }
-  }
-
-  @Test
-  void testSetGcmIdInvalidrequest() {
-    try (final Response response = resources.getJerseyTest()
-        .target("/v1/accounts/gcm/")
-        .request()
-        .header(HttpHeaders.AUTHORIZATION,
-            AuthHelper.getAuthHeader(AuthHelper.VALID_UUID_3, AuthHelper.VALID_PASSWORD_3_PRIMARY))
-        .put(Entity.json("{}"))) {
-
-      assertThat(response.getStatus()).isEqualTo(422);
-    }
-  }
-
-  @Test
-  void testSetGcmIdExcessiveLength() {
-    try (final Response response = resources.getJerseyTest()
-        .target("/v1/accounts/gcm/")
-        .request()
-        .header(HttpHeaders.AUTHORIZATION,
-            AuthHelper.getAuthHeader(AuthHelper.VALID_UUID_3, AuthHelper.VALID_PASSWORD_3_PRIMARY))
-        .put(Entity.json(new GcmRegistrationId(RandomStringUtils.insecure().nextAlphanumeric(2048))))) {
-
-      assertThat(response.getStatus()).isEqualTo(422);
-      verify(accountsManager, never()).updateDevice(any(), anyByte(), any());
     }
   }
 

@@ -31,18 +31,8 @@ public record DeviceActivationRequest(
     Optional<@Valid KEMSignedPreKey> pniPqLastResortPreKey,
 
     @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
-        An APNs token set for the account's primary device. If provided, the account's primary
-        device will be notified of new messages via push notifications to the given token.
-        Callers must provide exactly one of an APNs token set, an FCM token, or an
-        `AccountAttributes` entity with `fetchesMessages` set to `true`.
+        An APNs token set for an Apple device. Android ntfy topics are provisioned after
+        authenticated registration.
         """)
-    Optional<@Valid ApnRegistrationId> apnToken,
-
-    @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = """
-        An FCM/GCM token for the account's primary device. If provided, the account's primary
-        device will be notified of new messages via push notifications to the given token.
-        Callers must provide exactly one of an APNs token set, an FCM token, or an
-        `AccountAttributes` entity with `fetchesMessages` set to `true`.
-        """)
-    Optional<@Valid GcmRegistrationId> gcmToken) {
+    Optional<@Valid ApnRegistrationId> apnToken) {
 }

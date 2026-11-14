@@ -189,7 +189,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 accountsManager.generateLinkDeviceToken(account));
 
@@ -235,7 +234,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 linkDeviceToken);
 
@@ -252,7 +250,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 linkDeviceToken));
 
@@ -282,7 +279,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 accountsManager.generateLinkDeviceToken(account));
 
@@ -329,7 +325,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 accountsManager.generateLinkDeviceToken(account));
 
@@ -395,7 +390,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 linkDeviceToken);
 
@@ -432,7 +426,6 @@ public class AddRemoveDeviceIntegrationTest {
                     new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
                     Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
                     true,
-                    Optional.empty(),
                     Optional.empty()),
                 linkDeviceToken);
 
@@ -497,7 +490,6 @@ public class AddRemoveDeviceIntegrationTest {
             new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
             true,
-            Optional.empty(),
             Optional.empty()),
         linkDeviceToken);
 
@@ -535,7 +527,6 @@ public class AddRemoveDeviceIntegrationTest {
             new DeviceIdentityInfo(1, KeysHelper.signedECPreKey(1, aciKeyPair), KeysHelper.signedKEMPreKey(3, aciKeyPair)),
             Optional.of(new DeviceIdentityInfo(2, KeysHelper.signedECPreKey(2, pniKeyPair), KeysHelper.signedKEMPreKey(4, pniKeyPair))),
             true,
-            Optional.empty(),
             Optional.empty()),
         linkDeviceToken);
 

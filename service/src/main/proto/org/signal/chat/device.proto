@@ -112,19 +112,11 @@ message SetPushTokenRequest {
     string apns_token = 1 [(require.nonEmpty) = true, (require.size) = {max: 1024}];
   }
 
-  message FcmTokenRequest {
-    // An FCM push token.
-    string fcm_token = 1 [(require.nonEmpty) = true, (require.size) = {max: 1024}];
-  }
-
   oneof token_request {
     // If present, specifies the APNs device token(s) the server will use to
     // send new message notifications to the authenticated device.
     ApnsTokenRequest apns_token_request = 1;
 
-    // If present, specifies the FCM push token the server will use to send new
-    // message notifications to the authenticated device.
-    FcmTokenRequest fcm_token_request = 2;
   }
 }
 

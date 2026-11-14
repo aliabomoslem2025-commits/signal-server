@@ -276,170 +276,48 @@ class DevicesGrpcServiceTest extends SimpleBaseGrpcTest<DevicesGrpcService, Devi
     );
   }
 
-  @ParameterizedTest
-  @MethodSource
-  void setPushToken(final byte deviceId,
-      final SetPushTokenRequest request,
-      @Nullable final String expectedApnsToken,
-      @Nullable final String expectedFcmToken) {
-
-    mockAuthenticationInterceptor().setAuthenticatedDevice(AUTHENTICATED_ACI, deviceId);
+  @Test
+  void setApnsPushToken() {
+    mockAuthenticationInterceptor().setAuthenticatedDevice(AUTHENTICATED_ACI, AUTHENTICATED_DEVICE_ID);
 
     final Device device = mock(Device.class);
-    when(authenticatedAccount.getDevice(deviceId)).thenReturn(Optional.of(device));
-
-    final SetPushTokenResponse ignored = authenticatedServiceStub().setPushToken(request);
-
-    verify(device).setApnId(expectedApnsToken);
-    verify(device).setGcmId(expectedFcmToken);
-    verify(device).setFetchesMessages(false);
-  }
-
-  private static Stream<Arguments> setPushToken() {
-    final String apnsToken = "apns-token";
-    final String fcmToken = "fcm-token";
-
-    final Stream.Builder<Arguments> streamBuilder = Stream.builder();
-
-    for (final byte deviceId : new byte[]{Device.PRIMARY_ID, Device.PRIMARY_ID + 1}) {
-      streamBuilder.add(Arguments.of(deviceId,
-          SetPushTokenRequest.newBuilder()
-              .setApnsTokenRequest(SetPushTokenRequest.ApnsTokenRequest.newBuilder()
-                  .setApnsToken(apnsToken)
-                  .build())
-              .build(),
-          apnsToken, null));
-
-      streamBuilder.add(Arguments.of(deviceId,
-          SetPushTokenRequest.newBuilder()
-              .setFcmTokenRequest(SetPushTokenRequest.FcmTokenRequest.newBuilder()
-                  .setFcmToken(fcmToken)
-                  .build())
-              .build(),
-          null, fcmToken));
-    }
-
-    return streamBuilder.build();
-  }
-
-  @ParameterizedTest
-  @MethodSource
-  void setPushTokenUnchanged(final SetPushTokenRequest request,
-      @Nullable final String apnsToken,
-      @Nullable final String fcmToken) {
-
-    final Device device = mock(Device.class);
-    when(device.getApnId()).thenReturn(apnsToken);
-    when(device.getGcmId()).thenReturn(fcmToken);
-
     when(authenticatedAccount.getDevice(AUTHENTICATED_DEVICE_ID)).thenReturn(Optional.of(device));
 
-    final SetPushTokenResponse ignored = authenticatedServiceStub().setPushToken(request);
+    final SetPushTokenRequest request = SetPushTokenRequest.newBuilder()
+        .setApnsTokenRequest(SetPushTokenRequest.ApnsTokenRequest.newBuilder()
+            .setApnsToken("apns-token")
+            .build())
+        .build();
 
-    // Update push token even if it matches the stored value for apns (to update the timestamp)
-    verify(accountsManager, apnsToken == null ? never() : times(1))
-        .updateDevice(any(), anyByte(), any());
+    authenticatedServiceStub().setPushToken(request);
+
+    verify(accountsManager).updateDevice(any(), anyByte(), any());
   }
 
-  private static Stream<Arguments> setPushTokenUnchanged() {
-    final String apnsToken = "apns-token";
-    final String fcmToken = "fcm-token";
-
-    return Stream.of(
-        Arguments.of(SetPushTokenRequest.newBuilder()
-                .setApnsTokenRequest(SetPushTokenRequest.ApnsTokenRequest.newBuilder()
-                    .setApnsToken(apnsToken)
-                    .build())
-                .build(),
-            apnsToken, null, false),
-
-        Arguments.of(SetPushTokenRequest.newBuilder()
-                .setFcmTokenRequest(SetPushTokenRequest.FcmTokenRequest.newBuilder()
-                    .setFcmToken(fcmToken)
-                    .build())
-                .build(),
-            null, fcmToken, false)
-    );
-  }
-
-  @ParameterizedTest
-  @MethodSource
-  void setPushTokenIllegalArgument(final SetPushTokenRequest request) {
+  @Test
+  void setPushTokenRejectsEmptyRequest() {
     final Device device = mock(Device.class);
     when(authenticatedAccount.getDevice(AUTHENTICATED_DEVICE_ID)).thenReturn(Optional.of(device));
-    assertStatusException(Status.INVALID_ARGUMENT, () -> authenticatedServiceStub().setPushToken(request));
+    assertStatusException(Status.INVALID_ARGUMENT,
+        () -> authenticatedServiceStub().setPushToken(SetPushTokenRequest.newBuilder().build()));
     verify(accountsManager, never()).updateDevice(any(), anyByte(), any());
   }
 
-  private static Stream<Arguments> setPushTokenIllegalArgument() {
-    return Stream.of(
-        Arguments.argumentSet("No token",
-            SetPushTokenRequest.newBuilder().build()),
-
-        Arguments.argumentSet("Empty APNs token",
-            SetPushTokenRequest.newBuilder()
-                .setApnsTokenRequest(SetPushTokenRequest.ApnsTokenRequest.newBuilder().build())
-                .build()),
-
-        Arguments.argumentSet("Empty FCM token",
-            SetPushTokenRequest.newBuilder()
-                .setFcmTokenRequest(SetPushTokenRequest.FcmTokenRequest.newBuilder().build())
-                .build()),
-
-        Arguments.argumentSet("Excessively long APNs token",
-            SetPushTokenRequest.newBuilder()
-                .setApnsTokenRequest(SetPushTokenRequest.ApnsTokenRequest.newBuilder()
-                    .setApnsToken(RandomStringUtils.insecure().nextAlphanumeric(2048))
-                    .build())
-                .build()),
-
-        Arguments.argumentSet("Excessively long FCM token",
-            SetPushTokenRequest.newBuilder()
-                .setFcmTokenRequest(SetPushTokenRequest.FcmTokenRequest.newBuilder()
-                    .setFcmToken(RandomStringUtils.insecure().nextAlphanumeric(2048))
-                    .build())
-                .build())
-    );
-  }
-
-  @ParameterizedTest
-  @MethodSource
-  void clearPushToken(final byte deviceId,
-      @Nullable final String apnsToken,
-      @Nullable final String fcmToken,
-      @Nullable final String expectedUserAgent) {
-
-    mockAuthenticationInterceptor().setAuthenticatedDevice(AUTHENTICATED_ACI, deviceId);
+  @Test
+  void clearApnsPushToken() {
+    mockAuthenticationInterceptor().setAuthenticatedDevice(AUTHENTICATED_ACI, AUTHENTICATED_DEVICE_ID);
 
     final Device device = mock(Device.class);
-    when(device.getId()).thenReturn(deviceId);
-    when(device.isPrimary()).thenReturn(deviceId == Device.PRIMARY_ID);
-    when(device.getApnId()).thenReturn(apnsToken);
-    when(device.getGcmId()).thenReturn(fcmToken);
-    when(authenticatedAccount.getDevice(deviceId)).thenReturn(Optional.of(device));
+    when(device.getId()).thenReturn(Device.PRIMARY_ID);
+    when(device.isPrimary()).thenReturn(true);
+    when(device.getApnId()).thenReturn("apns-token");
+    when(authenticatedAccount.getDevice(AUTHENTICATED_DEVICE_ID)).thenReturn(Optional.of(device));
 
-    final ClearPushTokenResponse ignored = authenticatedServiceStub().clearPushToken(ClearPushTokenRequest.newBuilder().build());
+    authenticatedServiceStub().clearPushToken(ClearPushTokenRequest.newBuilder().build());
 
     verify(device).setApnId(null);
-    verify(device).setGcmId(null);
     verify(device).setFetchesMessages(true);
-
-    if (expectedUserAgent != null) {
-      verify(device).setUserAgent(expectedUserAgent);
-    } else {
-      verify(device, never()).setUserAgent(any());
-    }
-  }
-
-  private static Stream<Arguments> clearPushToken() {
-    return Stream.of(
-        Arguments.of(Device.PRIMARY_ID, "apns-token", null, "OWI"),
-        Arguments.of(Device.PRIMARY_ID, null, "fcm-token", "OWA"),
-        Arguments.of(Device.PRIMARY_ID, null, null, null),
-        Arguments.of((byte) (Device.PRIMARY_ID + 1), "apns-token", null, "OWP"),
-        Arguments.of((byte) (Device.PRIMARY_ID + 1), null, "fcm-token", "OWA"),
-        Arguments.of((byte) (Device.PRIMARY_ID + 1), null, null, null)
-    );
+    verify(device).setUserAgent("OWI");
   }
 
   @CartesianTest

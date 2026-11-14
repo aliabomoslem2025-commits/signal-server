@@ -90,7 +90,7 @@ public class IdleWakeupEligibilityChecker {
 
   @VisibleForTesting
   static boolean hasPushToken(final Device device) {
-    return !StringUtils.isAllBlank(device.getApnId(), device.getGcmId());
+    return StringUtils.isNotBlank(device.getApnId()) || StringUtils.isNotBlank(device.getNtfyTopic());
   }
 
 }

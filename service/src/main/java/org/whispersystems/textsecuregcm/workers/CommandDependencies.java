@@ -50,7 +50,7 @@ import org.whispersystems.textsecuregcm.purchases.AppleAppStoreClient;
 import org.whispersystems.textsecuregcm.purchases.AppleAppStoreManager;
 import org.whispersystems.textsecuregcm.purchases.GooglePlayBillingManager;
 import org.whispersystems.textsecuregcm.push.APNSender;
-import org.whispersystems.textsecuregcm.push.FcmSender;
+import org.whispersystems.textsecuregcm.push.NtfySender;
 import org.whispersystems.textsecuregcm.push.PushNotificationManager;
 import org.whispersystems.textsecuregcm.push.PushNotificationScheduler;
 import org.whispersystems.textsecuregcm.redis.FaultTolerantRedisClient;
@@ -112,7 +112,7 @@ public record CommandDependencies(
     KeysManager keysManager,
     PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
     APNSender apnSender,
-    FcmSender fcmSender,
+    NtfySender ntfySender,
     PushNotificationManager pushNotificationManager,
     FaultTolerantRedisClusterClient cacheCluster,
     FaultTolerantRedisClusterClient pushSchedulerCluster,
@@ -236,8 +236,6 @@ public record CommandDependencies(
         .keepAliveTime(io.dropwizard.util.Duration.seconds(60L)).build();
     ExecutorService apnSenderExecutor = ExecutorServiceBuilder.of(environment, "apnSender")
         .maxThreads(1).minThreads(1).build();
-    ExecutorService fcmSenderExecutor = ExecutorServiceBuilder.of(environment, "fcmSender")
-        .maxThreads(16).minThreads(16).build();
     ExecutorService clientEventExecutor = ManagedExecutors.newVirtualThreadPerTaskExecutor(
       "clientEvent", configuration.getVirtualThreadConfiguration().maxConcurrentThreadsPerExecutor(), environment);
     ExecutorService asyncOperationQueueingExecutor = ExecutorServiceBuilder.of(environment, "asyncOperationQueueing")
@@ -444,11 +442,11 @@ public record CommandDependencies(
         issuedReceiptsManager);
 
     APNSender apnSender = new APNSender(apnSenderExecutor, Clock.systemUTC(), configuration.getApnConfiguration());
-    FcmSender fcmSender = new FcmSender(fcmSenderExecutor, configuration.getFcmConfiguration().credentials().value());
+    NtfySender ntfySender = new NtfySender(configuration.getNtfyConfiguration());
     PushNotificationScheduler pushNotificationScheduler = new PushNotificationScheduler(pushSchedulerCluster,
-        apnSender, fcmSender, accountsManager, 0, 0, retryExecutor);
+        apnSender, accountsManager, 0, 0, retryExecutor);
     PushNotificationManager pushNotificationManager = new PushNotificationManager(accountsManager,
-        apnSender, fcmSender, pushNotificationScheduler);
+        apnSender, ntfySender, pushNotificationScheduler);
 
     final DynamoDbRecoveryManager dynamoDbRecoveryManager =
         new DynamoDbRecoveryManager(accounts, phoneNumberIdentifiers);
@@ -465,7 +463,7 @@ public record CommandDependencies(
         keys,
         phoneNumberRecoveryPasswordsManager,
         apnSender,
-        fcmSender,
+        ntfySender,
         pushNotificationManager,
         cacheCluster,
         pushSchedulerCluster,

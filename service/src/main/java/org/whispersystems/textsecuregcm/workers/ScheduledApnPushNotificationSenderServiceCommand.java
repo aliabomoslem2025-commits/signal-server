@@ -87,7 +87,6 @@ public class ScheduledApnPushNotificationSenderServiceCommand extends ServerComm
     final PushNotificationScheduler pushNotificationScheduler = new PushNotificationScheduler(
         deps.pushSchedulerCluster(),
         deps.apnSender(),
-        deps.fcmSender(),
         deps.accountsManager(),
         namespace.getInt(WORKER_COUNT),
         namespace.getInt(MAX_CONCURRENCY),

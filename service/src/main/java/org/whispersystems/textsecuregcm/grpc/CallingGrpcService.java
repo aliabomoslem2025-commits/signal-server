@@ -10,7 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.signal.chat.calling.GetCallingRelaysRequest;
 import org.signal.chat.calling.GetCallingRelaysResponse;
 import org.signal.chat.calling.SimpleCallingGrpc;
-import org.whispersystems.textsecuregcm.auth.CloudflareTurnCredentialsManager;
+import org.whispersystems.textsecuregcm.auth.TurnCredentialsProvider;
 import org.whispersystems.textsecuregcm.auth.TurnToken;
 import org.whispersystems.textsecuregcm.auth.grpc.AuthenticatedDevice;
 import org.whispersystems.textsecuregcm.auth.grpc.AuthenticationUtil;
@@ -19,13 +19,13 @@ import org.whispersystems.textsecuregcm.limits.RateLimiters;
 
 public class CallingGrpcService extends SimpleCallingGrpc.CallingImplBase {
 
-  private final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager;
+  private final TurnCredentialsProvider turnCredentialsProvider;
   private final RateLimiters rateLimiters;
 
-  public CallingGrpcService(final CloudflareTurnCredentialsManager cloudflareTurnCredentialsManager,
+  public CallingGrpcService(final TurnCredentialsProvider turnCredentialsProvider,
       final RateLimiters rateLimiters) {
 
-    this.cloudflareTurnCredentialsManager = cloudflareTurnCredentialsManager;
+    this.turnCredentialsProvider = turnCredentialsProvider;
     this.rateLimiters = rateLimiters;
   }
 
@@ -37,7 +37,7 @@ public class CallingGrpcService extends SimpleCallingGrpc.CallingImplBase {
     rateLimiters.getCallEndpointLimiter().validate(authenticatedDevice.accountIdentifier());
 
     final TurnToken turnToken =
-        cloudflareTurnCredentialsManager.retrieveFromCloudflare(authenticatedDevice.accountIdentifier());
+        turnCredentialsProvider.retrieve(authenticatedDevice.accountIdentifier());
 
     final GetCallingRelaysResponse.Relay.Builder relayBuilder = GetCallingRelaysResponse.Relay.newBuilder()
         .setUsername(turnToken.username())

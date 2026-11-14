@@ -25,7 +25,7 @@ public class DevicePlatformUtil {
   public static Optional<ClientPlatform> getDevicePlatform(final Device device) {
     final Optional<ClientPlatform> clientPlatform;
 
-    if (StringUtils.isNotBlank(device.getGcmId())) {
+    if (StringUtils.isNotBlank(device.getNtfyTopic())) {
       clientPlatform = Optional.of(ClientPlatform.ANDROID);
     } else if (StringUtils.isNotBlank(device.getApnId())) {
       clientPlatform = Optional.of(ClientPlatform.IOS);

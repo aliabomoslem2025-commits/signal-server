@@ -283,9 +283,8 @@ public class DeviceController {
 
     if (deviceActivationRequest.apnToken().isPresent()) {
       signalAgent = "OWP";
-    } else if (deviceActivationRequest.gcmToken().isPresent()) {
-      signalAgent = "OWA";
     } else {
+      // Android push topics are provisioned after account registration.
       signalAgent = "OWD";
     }
 
@@ -305,8 +304,7 @@ public class DeviceController {
                       deviceActivationRequest.pniSignedPreKey().get(),
                       deviceActivationRequest.pniPqLastResortPreKey().get())),
               deviceAttributes.fetchesMessages(),
-              deviceActivationRequest.apnToken(),
-              deviceActivationRequest.gcmToken()),
+              deviceActivationRequest.apnToken()),
           linkDeviceRequest.verificationCode());
 
       return new LinkDeviceResponse(

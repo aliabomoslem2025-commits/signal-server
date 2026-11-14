@@ -332,7 +332,6 @@ public class AccountsHelper {
               KeysHelper.signedECPreKey(2, pniKeyPair),
               KeysHelper.signedKEMPreKey(4, pniKeyPair))),
           accountAttributes.getFetchesMessages(),
-          Optional.empty(),
           Optional.empty());
 
       if (e164 != null) {

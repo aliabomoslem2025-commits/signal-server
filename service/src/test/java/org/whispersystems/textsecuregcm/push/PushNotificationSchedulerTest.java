@@ -48,7 +48,6 @@ class PushNotificationSchedulerTest {
   private Device device;
 
   private APNSender apnSender;
-  private FcmSender fcmSender;
   private TestClock clock;
 
   private PushNotificationScheduler pushNotificationScheduler;
@@ -57,7 +56,6 @@ class PushNotificationSchedulerTest {
   private static final String ACCOUNT_NUMBER = "+18005551234";
   private static final byte DEVICE_ID = 1;
   private static final String APN_ID = RandomStringUtils.secure().nextAlphanumeric(32);
-  private static final String GCM_ID = RandomStringUtils.secure().nextAlphanumeric(32);
 
   @BeforeEach
   void setUp() throws Exception {
@@ -65,7 +63,6 @@ class PushNotificationSchedulerTest {
     device = mock(Device.class);
     when(device.getId()).thenReturn(DEVICE_ID);
     when(device.getApnId()).thenReturn(APN_ID);
-    when(device.getGcmId()).thenReturn(GCM_ID);
     when(device.getLastSeen()).thenReturn(System.currentTimeMillis());
 
     account = mock(Account.class);
@@ -79,21 +76,17 @@ class PushNotificationSchedulerTest {
         .thenReturn(CompletableFuture.completedFuture(Optional.of(account)));
 
     apnSender = mock(APNSender.class);
-    fcmSender = mock(FcmSender.class);
     clock = TestClock.now();
 
     when(apnSender.sendNotification(any()))
         .thenReturn(CompletableFuture.completedFuture(new SendPushNotificationResult(true, Optional.empty(), false, Optional.empty())));
 
-    when(fcmSender.sendNotification(any()))
-        .thenReturn(CompletableFuture.completedFuture(new SendPushNotificationResult(true, Optional.empty(), false, Optional.empty())));
-
     pushNotificationScheduler = new PushNotificationScheduler(REDIS_CLUSTER_EXTENSION.getRedisCluster(),
-        apnSender, fcmSender, accountsManager, clock, 1, 1, mock(ScheduledExecutorService.class));
+        apnSender, accountsManager, clock, 1, 1, mock(ScheduledExecutorService.class));
   }
 
   @ParameterizedTest
-  @EnumSource(PushNotification.TokenType.class)
+  @EnumSource(value = PushNotification.TokenType.class, names = "APN")
   void testScheduleBackgroundNotificationWithNoRecentApnsNotification(PushNotification.TokenType tokenType) throws ExecutionException, InterruptedException {
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     clock.pin(now);
@@ -167,18 +160,12 @@ class PushNotificationSchedulerTest {
     assertEquals(1, worker.processScheduledBackgroundNotifications(tokenType, slot));
 
     final ArgumentCaptor<PushNotification> notificationCaptor = ArgumentCaptor.forClass(PushNotification.class);
-    verify(switch (tokenType) {
-      case FCM -> fcmSender;
-      case APN -> apnSender;
-    }).sendNotification(notificationCaptor.capture());
+    verify(apnSender).sendNotification(notificationCaptor.capture());
 
     final PushNotification pushNotification = notificationCaptor.getValue();
 
     assertEquals(tokenType, pushNotification.tokenType());
-    assertEquals(switch (tokenType) {
-      case FCM -> GCM_ID;
-      case APN -> APN_ID;
-    }, pushNotification.deviceToken());
+    assertEquals(APN_ID, pushNotification.deviceToken());
     assertEquals(account, pushNotification.destination());
     assertEquals(device, pushNotification.destinationDevice());
     assertEquals(PushNotification.NotificationType.NOTIFICATION, pushNotification.notificationType());
@@ -265,7 +252,7 @@ class PushNotificationSchedulerTest {
 
     final AccountsManager accountsManager = mock(AccountsManager.class);
 
-    pushNotificationScheduler = new PushNotificationScheduler(redisCluster, apnSender, fcmSender,
+    pushNotificationScheduler = new PushNotificationScheduler(redisCluster, apnSender,
         accountsManager, dedicatedThreadCount, 1, mock(ScheduledExecutorService.class));
 
     pushNotificationScheduler.start();
