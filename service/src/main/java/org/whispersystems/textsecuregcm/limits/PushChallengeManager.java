@@ -58,7 +58,7 @@ public class PushChallengeManager {
 
       sent = true;
 
-      if (StringUtils.isNotBlank(primaryDevice.getGcmId())) {
+      if (StringUtils.isNotBlank(primaryDevice.getNtfyTopic())) {
         platform = ClientPlatform.ANDROID.name().toLowerCase();
       } else if (StringUtils.isNotBlank(primaryDevice.getApnId())) {
         platform = ClientPlatform.IOS.name().toLowerCase();
@@ -88,7 +88,7 @@ public class PushChallengeManager {
 
     final String platform;
 
-    if (StringUtils.isNotBlank(account.getPrimaryDevice().getGcmId())) {
+    if (StringUtils.isNotBlank(account.getPrimaryDevice().getNtfyTopic())) {
       platform = ClientPlatform.ANDROID.name().toLowerCase();
     } else if (StringUtils.isNotBlank(account.getPrimaryDevice().getApnId())) {
       platform = ClientPlatform.IOS.name().toLowerCase();
