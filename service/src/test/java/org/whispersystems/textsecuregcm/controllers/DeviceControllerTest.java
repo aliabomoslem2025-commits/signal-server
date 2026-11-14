@@ -261,7 +261,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         deviceAttributes,
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey).filter(_ -> withPhoneNumber), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey).filter(_ -> withPhoneNumber), apnRegistrationId, gcmRegistrationId));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey).filter(_ -> withPhoneNumber), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey).filter(_ -> withPhoneNumber), apnRegistrationId));
 
     final LinkDeviceResponse response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -344,7 +344,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(false, 1234, 5678, null, requestCapabilities),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     final int expectedStatus =
         capability.getAccountCapabilityMode() != DeviceCapability.AccountCapabilityMode.ALWAYS_CAPABLE
@@ -397,7 +397,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(false, 1234, 5678, null, requestCapabilities),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -435,7 +435,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(false, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -481,7 +481,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         deviceAttributes,
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -517,7 +517,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         deviceAttributes,
-        new DeviceActivationRequest(aciSignedPreKey, Optional.empty(), aciPqLastResortPreKey, Optional.empty(), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.empty(), aciPqLastResortPreKey, Optional.empty(), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -563,7 +563,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
             new DeviceAttributes(false, 1234, 5678, null, null),
-            new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+            new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
             .target("/v1/devices/link")
@@ -612,7 +612,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest(deviceCode.token(),
         new DeviceAttributes(fetchesMessages, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), apnRegistrationId, gcmRegistrationId));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), apnRegistrationId));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -653,7 +653,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(true, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.ofNullable(pniSignedPreKey), aciPqLastResortPreKey, Optional.ofNullable(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.ofNullable(pniSignedPreKey), aciPqLastResortPreKey, Optional.ofNullable(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -704,7 +704,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(true, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -744,7 +744,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(true, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -784,7 +784,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(true, 1234, 5678, null, DeviceCapability.CAPABILITIES_REQUIRED_FOR_NEW_DEVICES),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -817,7 +817,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(true, 1234, 5678, null, null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -876,7 +876,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(false, 1234, 5678, TestRandomUtil.nextBytes(512), null),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -921,7 +921,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         new DeviceAttributes(false, registrationId, pniRegistrationId, null, DeviceCapability.CAPABILITIES_REQUIRED_FOR_NEW_DEVICES),
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.of(new ApnRegistrationId("apn")), Optional.empty()));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.of(new ApnRegistrationId("apn"))));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -972,7 +972,7 @@ class DeviceControllerTest {
 
     final LinkDeviceRequest request = new LinkDeviceRequest("link-device-token",
         null,
-        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty(), Optional.of(new GcmRegistrationId("gcm-id"))));
+        new DeviceActivationRequest(aciSignedPreKey, Optional.of(pniSignedPreKey), aciPqLastResortPreKey, Optional.of(pniPqLastResortPreKey), Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
         .target("/v1/devices/link")
@@ -1583,7 +1583,6 @@ class DeviceControllerTest {
             Optional.of(KeysHelper.signedECPreKey(2, pniIdentityKeyPair)),
             KeysHelper.signedKEMPreKey(3, aciIdentityKeyPair),
             Optional.of(KeysHelper.signedKEMPreKey(4, pniIdentityKeyPair)),
-            Optional.empty(),
             Optional.empty()));
 
     try (final Response response = resources.getJerseyTest()
