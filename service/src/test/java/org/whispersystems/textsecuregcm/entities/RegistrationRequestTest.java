@@ -100,7 +100,6 @@ class RegistrationRequestTest {
             Optional.ofNullable(pniEcSignedPreKey),
             aciKemSignedPreKey,
             Optional.ofNullable(pniKemSignedPreKey),
-            Optional.empty(),
             Optional.empty()));
   }
 
@@ -146,8 +145,7 @@ class RegistrationRequestTest {
             Optional.empty(),
             null,
             Optional.empty(),
-            Optional.ofNullable(apnsToken).map(ApnRegistrationId::new),
-            Optional.ofNullable(fcmToken).map(GcmRegistrationId::new)));
+            Optional.ofNullable(apnsToken).map(ApnRegistrationId::new)));
   }
 
   @CartesianTest
@@ -174,7 +172,6 @@ class RegistrationRequestTest {
             pniEcSignedPreKeyPresent ? Optional.of(pniEcSignedPreKey) : Optional.empty(),
             null,
             pniKemSignedPreKeyPresent ? Optional.of(pniKemSignedPreKey) : Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final boolean expectAllPresentOrAbsent =
@@ -202,7 +199,6 @@ class RegistrationRequestTest {
             Optional.empty(),
             null,
             Optional.empty(),
-            Optional.empty(),
             Optional.empty()));
 
     final boolean expectFailure = hasReceipt && (hasWebAuthn || hasTotp);
@@ -225,7 +221,6 @@ class RegistrationRequestTest {
         new DeviceActivationRequest(null,
             Optional.empty(),
             null,
-            Optional.empty(),
             Optional.empty(),
             Optional.empty()));
 
