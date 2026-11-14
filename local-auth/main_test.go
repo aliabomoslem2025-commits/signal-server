@@ -5,7 +5,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +37,24 @@ func TestTicketRoundTripAndTamperDetection(t *testing.T) {
 		t.Fatal("verifyTicket() accepted a modified signature")
 	}
 }
+
+func TestRegistrationSessionIDUsesBase64URL(t *testing.T) {
+	ticket := "lan1." + strings.Repeat("+/payload", 8)
+	sessionID := base64.RawURLEncoding.EncodeToString([]byte("LAN1." + ticket))
+
+	if strings.ContainsAny(sessionID, "+/=") {
+		t.Fatalf("registration session ID is not URL-safe: %q", sessionID)
+	}
+
+	decoded, err := base64.RawURLEncoding.DecodeString(sessionID)
+	if err != nil {
+		t.Fatalf("could not decode registration session ID: %v", err)
+	}
+	if string(decoded) != "LAN1."+ticket {
+		t.Fatalf("decoded session ID = %q, want %q", decoded, "LAN1."+ticket)
+	}
+}
+
 
 func TestParsePublicKeyAcceptsOnlyP256(t *testing.T) {
 	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
