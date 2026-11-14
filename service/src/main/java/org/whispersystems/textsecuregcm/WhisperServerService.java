@@ -146,7 +146,6 @@ import org.whispersystems.textsecuregcm.controllers.SecureStorageController;
 import org.whispersystems.textsecuregcm.controllers.SecureValueRecovery2Controller;
 import org.whispersystems.textsecuregcm.controllers.StickerController;
 import org.whispersystems.textsecuregcm.controllers.SubscriptionController;
-import org.whispersystems.textsecuregcm.controllers.VerificationController;
 import org.whispersystems.textsecuregcm.currency.CoinGeckoClient;
 import org.whispersystems.textsecuregcm.currency.CurrencyConversionManager;
 import org.whispersystems.textsecuregcm.currency.FixerClient;
@@ -239,6 +238,8 @@ import org.whispersystems.textsecuregcm.metrics.MicrometerAwsSdkMetricPublisher;
 import org.whispersystems.textsecuregcm.metrics.ReportedMessageMetricsListener;
 import org.whispersystems.textsecuregcm.metrics.TlsCertificateExpirationUtil;
 import org.whispersystems.textsecuregcm.metrics.TrafficSource;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthController;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.providers.MultiRecipientMessageProvider;
 import org.whispersystems.textsecuregcm.push.APNSender;
 import org.whispersystems.textsecuregcm.push.FcmSender;
@@ -250,7 +251,6 @@ import org.whispersystems.textsecuregcm.push.ReceiptSender;
 import org.whispersystems.textsecuregcm.redis.ConnectionEventLogger;
 import org.whispersystems.textsecuregcm.redis.FaultTolerantRedisClient;
 import org.whispersystems.textsecuregcm.redis.FaultTolerantRedisClusterClient;
-import org.whispersystems.textsecuregcm.registration.RegistrationServiceClient;
 import org.whispersystems.textsecuregcm.s3.PostPolicyGenerator;
 import org.whispersystems.textsecuregcm.s3.S3MonitoringSupplier;
 import org.whispersystems.textsecuregcm.securestorage.SecureStorageClient;
@@ -299,8 +299,6 @@ import org.whispersystems.textsecuregcm.storage.SingleUseECPreKeyStore;
 import org.whispersystems.textsecuregcm.storage.SubscriptionManager;
 import org.whispersystems.textsecuregcm.storage.Subscriptions;
 import org.whispersystems.textsecuregcm.storage.TotpManager;
-import org.whispersystems.textsecuregcm.storage.VerificationSessionManager;
-import org.whispersystems.textsecuregcm.storage.VerificationSessions;
 import org.whispersystems.textsecuregcm.storage.devicecheck.AppleDeviceCheckManager;
 import org.whispersystems.textsecuregcm.storage.devicecheck.AppleDeviceCheckTrustAnchor;
 import org.whispersystems.textsecuregcm.storage.devicecheck.AppleDeviceChecks;
@@ -630,9 +628,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         dynamoDbClient,
         clock);
 
-    final VerificationSessions verificationSessions = new VerificationSessions(dynamoDbClient,
-        config.getDynamoDbTables().getVerificationSessions().getTableName(), clock);
-
     final ClientResources sharedClientResources = ClientResources.builder()
         .commandLatencyRecorder(
             new MicrometerCommandLatencyRecorder(Metrics.globalRegistry, MicrometerOptions.builder().build()))
@@ -673,8 +668,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     final ScheduledExecutorService retryExecutor = ScheduledExecutorServiceBuilder.of(environment, "retry")
         .threads(16).build();
-    final ScheduledExecutorService registrationIdentityTokenRefreshExecutor =
-        ScheduledExecutorServiceBuilder.of(environment, "registrationIdentityTokenRefresh").threads(1).build();
     final ScheduledExecutorService presenceRenewalExecutor =
         ScheduledExecutorServiceBuilder.of(environment, "presenceRenewal").threads(4).build();
 
@@ -772,8 +765,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             config.getHlrLookupConfiguration().retryConfigurationName(),
             retryExecutor);
 
-    RegistrationServiceClient registrationServiceClient = config.getRegistrationServiceConfiguration()
-        .build(environment, registrationIdentityTokenRefreshExecutor);
     KeyTransparencyServiceClient keyTransparencyServiceClient = new KeyTransparencyServiceClient(
         config.getKeyTransparencyServiceConfiguration().host(),
         config.getKeyTransparencyServiceConfiguration().port(),
@@ -943,7 +934,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(provisioningManager);
     environment.lifecycle().manage(disconnectionRequestManager);
     environment.lifecycle().manage(currencyManager);
-    environment.lifecycle().manage(registrationServiceClient);
     environment.lifecycle().manage(keyTransparencyServiceClient);
     environment.lifecycle().manage(clientReleaseManager);
     environment.lifecycle().manage(virtualThreadPinEventMonitor);
@@ -1128,8 +1118,15 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             config.getDeliveryCertificate().expiresDays(),
             config.getDeliveryCertificate().embedSigner());
 
+    final String localAuthTableName = System.getenv("LOCAL_AUTH_TABLE") == null
+        || System.getenv("LOCAL_AUTH_TABLE").isBlank()
+        ? LocalDeviceAuthStore.DEFAULT_TABLE_NAME
+        : System.getenv("LOCAL_AUTH_TABLE");
+    final LocalDeviceAuthStore localDeviceAuthStore = new LocalDeviceAuthStore(dynamoDbClient, localAuthTableName);
+
     final PhoneVerificationTokenManager phoneVerificationTokenManager = new PhoneVerificationTokenManager(
-        phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager, registrationRecoveryChecker);
+        phoneNumberIdentifiers, null, phoneNumberRecoveryPasswordsManager, registrationRecoveryChecker,
+        localDeviceAuthStore);
 
     final ChangeNumberManager changeNumberManager = new ChangeNumberManager(messageSender, accountsManager,
         phoneVerificationTokenManager, registrationLockVerificationManager, rateLimiters,
@@ -1281,6 +1278,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.jersey().register(new AuthDynamicFeature(accountAuthFilter));
     environment.jersey().register(new AuthValueFactoryProvider.Binder<>(AuthenticatedDevice.class));
     environment.jersey().register(new TimestampResponseFilter());
+    environment.jersey().register(new LocalDeviceAuthController(localDeviceAuthStore));
 
     ///
     WebSocketEnvironment<AuthenticatedDevice> webSocketEnvironment = new WebSocketEnvironment<>(environment,
@@ -1338,10 +1336,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         new SecureStorageController(storageCredentialsGenerator),
         new SecureValueRecovery2Controller(svr2CredentialsGenerator, accountsManager),
         new StickerController(rateLimiters, stickerPolicyGenerator, Clock.systemUTC()),
-        new VerificationController(registrationServiceClient, new VerificationSessionManager(verificationSessions),
-            pushNotificationManager, registrationCaptchaManager, phoneNumberRecoveryPasswordsManager,
-            phoneNumberIdentifiers, rateLimiters, accountsManager, carrierDataProvider, registrationFraudChecker,
-            dynamicConfigurationManager, clock),
         new SubscriptionController(clock, config.getSubscription(), config.getOneTimeDonations(),
             config.getLoginPurchase(), subscriptionManager, stripeManager, braintreeManager, googlePlayBillingManager,
             appleAppStoreManager,

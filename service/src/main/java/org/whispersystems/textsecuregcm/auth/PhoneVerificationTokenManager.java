@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.entities.PhoneVerificationRequest;
 import org.whispersystems.textsecuregcm.entities.RegistrationServiceSession;
+import org.whispersystems.textsecuregcm.localauth.LocalDeviceAuthStore;
 import org.whispersystems.textsecuregcm.registration.RegistrationServiceClient;
 import org.whispersystems.textsecuregcm.spam.RegistrationRecoveryChecker;
 import org.whispersystems.textsecuregcm.storage.PhoneNumberIdentifiers;
@@ -32,18 +33,29 @@ public class PhoneVerificationTokenManager {
 
   private final PhoneNumberIdentifiers phoneNumberIdentifiers;
 
-  private final RegistrationServiceClient registrationServiceClient;
+  @Nullable private final RegistrationServiceClient registrationServiceClient;
   private final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager;
   private final RegistrationRecoveryChecker registrationRecoveryChecker;
+  private final LocalDeviceAuthStore localDeviceAuthStore;
+
+  public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
+      @Nullable final RegistrationServiceClient registrationServiceClient,
+      final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
+      final RegistrationRecoveryChecker registrationRecoveryChecker) {
+    this(phoneNumberIdentifiers, registrationServiceClient, phoneNumberRecoveryPasswordsManager,
+        registrationRecoveryChecker, null);
+  }
 
   public PhoneVerificationTokenManager(final PhoneNumberIdentifiers phoneNumberIdentifiers,
       final RegistrationServiceClient registrationServiceClient,
       final PhoneNumberRecoveryPasswordsManager phoneNumberRecoveryPasswordsManager,
-      final RegistrationRecoveryChecker registrationRecoveryChecker) {
+      final RegistrationRecoveryChecker registrationRecoveryChecker,
+      @Nullable final LocalDeviceAuthStore localDeviceAuthStore) {
     this.phoneNumberIdentifiers = phoneNumberIdentifiers;
     this.registrationServiceClient = registrationServiceClient;
     this.phoneNumberRecoveryPasswordsManager = phoneNumberRecoveryPasswordsManager;
     this.registrationRecoveryChecker = registrationRecoveryChecker;
+    this.localDeviceAuthStore = localDeviceAuthStore;
   }
 
   /**
@@ -90,6 +102,19 @@ public class PhoneVerificationTokenManager {
 
   private void verifyBySessionId(final String number, final byte[] sessionId)
       throws UnverifiedRegistrationSessionException, InvalidRegistrationSessionException, IOException {
+    if (localDeviceAuthStore != null) {
+      // In a local deployment, only sessions created and verified by the LAN device-auth flow are valid.
+      // Never fall back to the upstream registration service or its SMS/voice verification path.
+      if (localDeviceAuthStore.isVerifiedRegistrationSession(number, sessionId)) {
+        return;
+      }
+      throw new UnverifiedRegistrationSessionException();
+    }
+
+    if (registrationServiceClient == null) {
+      throw new UnverifiedRegistrationSessionException();
+    }
+
     try {
       final RegistrationServiceSession session = registrationServiceClient
           .getSession(sessionId, REGISTRATION_RPC_TIMEOUT)
