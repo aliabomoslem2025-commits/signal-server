@@ -25,6 +25,42 @@ Set the following values in `.env` before starting:
 
 The ZK parameters are cryptographic protocol material, not arbitrary passwords. The server-side secret, Calling Frontend secret, and Android app public parameters must form the same key set. The repository intentionally does not contain default/example values. Until the matching values are installed and verified, group calls must be considered unavailable.
 
+## Connect TURN credentials to Signal Server
+
+The coturn container uses the TURN REST API shared-secret mechanism. Use the same random value in both places; it is not the Calling Frontend's `CALLING_AUTH_KEY`.
+
+Generate the TURN secret once:
+
+```sh
+openssl rand -hex 32
+```
+
+Put that exact 64-character hex string into `TURN_STATIC_AUTH_SECRET` in this stack's private `.env`, and configure the Signal Server secret store with the same string:
+
+```yaml
+turn:
+  local:
+    sharedSecret: secret://turn.local.sharedSecret
+    urls:
+      - turn:call.lan:3478?transport=udp
+      - turn:call.lan:3478?transport=tcp
+    credentialTtl: PT1H
+```
+
+The Java server signs coturn REST usernames with HMAC-SHA1 and sends only expiring credentials and URLs to the app. Do not copy the TURN secret to the Android app.
+
+The Android runtime configuration needs the Calling Frontend endpoint:
+
+```json
+{
+  "services": {
+    "sfu": "https://call.lan"
+  }
+}
+```
+
+The app retrieves one-to-one call TURN credentials from the Signal Server calling API; group calls use the configured `services.sfu` endpoint. The calling frontend and Signal Server must use the same ZK parameter set described above.
+
 ## Start
 
 ```sh
