@@ -63,7 +63,7 @@ public class PushChallengeManager {
       } else if (StringUtils.isNotBlank(primaryDevice.getApnId())) {
         platform = ClientPlatform.IOS.name().toLowerCase();
       } else {
-        // This should never happen; if the account has neither an APN nor FCM token, sending the challenge will result
+        // This should never happen; if the account has neither an APNs registration nor an ntfy topic, sending the challenge will result
         // in a `NotPushRegisteredException`
         platform = "unrecognized";
       }
