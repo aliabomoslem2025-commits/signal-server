@@ -289,6 +289,24 @@ public class RegistrationController {
       existingAccount = Optional.of(checkMfa(existingAccount.get(), registrationRequest.webAuthnResponse(), registrationRequest.totp()));
     }
 
+    final byte[] decodedRegistrationSessionId = StringUtils.isNotBlank(registrationRequest.sessionId())
+        ? registrationRequest.decodeSessionId()
+        : null;
+    final boolean localAuthSession = phoneVerificationTokenManager.isLocalAuthSession(decodedRegistrationSessionId);
+    if (localAuthSession) {
+      try {
+        // Redeem before creating the account: a replay or a revoked device must never leave a partially-created account.
+        phoneVerificationTokenManager.consumeLocalAuthSession(number, decodedRegistrationSessionId);
+      } catch (final InvalidRegistrationSessionException e) {
+        throw new BadRequestException(e.getMessage());
+      } catch (final IOException e) {
+        throw new ServiceUnavailableException("local authentication service unavailable");
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new ServiceUnavailableException("local authentication service interrupted");
+      }
+    }
+
     final Account account = accounts.create(number,
         registrationRequest.accountAttributes(),
         registrationRequest.aciIdentityKey(),
@@ -312,18 +330,7 @@ public class RegistrationController {
             registrationRequest.deviceActivationRequest().gcmToken()),
         userAgent);
 
-    final byte[] decodedRegistrationSessionId = StringUtils.isNotBlank(registrationRequest.sessionId())
-        ? registrationRequest.decodeSessionId()
-        : null;
-    if (phoneVerificationTokenManager.isLocalAuthSession(decodedRegistrationSessionId)) {
-      try {
-        phoneVerificationTokenManager.consumeLocalAuthSession(number, decodedRegistrationSessionId);
-      } catch (final InvalidRegistrationSessionException e) {
-        throw new BadRequestException(e.getMessage());
-      } catch (final IOException e) {
-        throw new ServiceUnavailableException("local authentication service unavailable");
-      }
-    } else if (verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
+    if (!localAuthSession && verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
       try {
         registrationFraudChecker.handleVerificationCompleted(registrationRequest.sessionId(), account);
       } catch (final Exception e) {
