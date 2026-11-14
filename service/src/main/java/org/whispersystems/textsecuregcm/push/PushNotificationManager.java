@@ -28,7 +28,7 @@ public class PushNotificationManager {
 
   private final AccountsManager accountsManager;
   private final APNSender apnSender;
-  private final FcmSender fcmSender;
+  private final NtfySender ntfySender;
   private final PushNotificationScheduler pushNotificationScheduler;
 
   private static final Duration VERIFICATION_CODE_TTL = Duration.ofMinutes(10);
@@ -41,12 +41,12 @@ public class PushNotificationManager {
 
   public PushNotificationManager(final AccountsManager accountsManager,
       final APNSender apnSender,
-      final FcmSender fcmSender,
+      final NtfySender ntfySender,
       final PushNotificationScheduler pushNotificationScheduler) {
 
     this.accountsManager = accountsManager;
     this.apnSender = apnSender;
-    this.fcmSender = fcmSender;
+    this.ntfySender = ntfySender;
     this.pushNotificationScheduler = pushNotificationScheduler;
   }
 
@@ -110,7 +110,7 @@ public class PushNotificationManager {
   Pair<String, PushNotification.TokenType> getToken(final Device device) throws NotPushRegisteredException {
     final Pair<String, PushNotification.TokenType> tokenAndType;
 
-    if (StringUtils.isNotBlank(device.getGcmId())) {
+    if (StringUtils.isNotBlank(device.getNtfyTopic())) {
       tokenAndType = new Pair<>(device.getGcmId(), PushNotification.TokenType.FCM);
     } else if (StringUtils.isNotBlank(device.getApnId())) {
       tokenAndType = new Pair<>(device.getApnId(), PushNotification.TokenType.APN);
@@ -134,7 +134,7 @@ public class PushNotificationManager {
     }
 
     final PushNotificationSender sender = switch (pushNotification.tokenType()) {
-      case FCM -> fcmSender;
+      case FCM -> ntfySender;
       case APN -> apnSender;
     };
 
@@ -221,7 +221,7 @@ public class PushNotificationManager {
               // Don't clear the token if it's already changed
               if (originalToken.equals(getPushToken(d, tokenType))) {
                 switch (tokenType) {
-                  case FCM -> d.setGcmId(null);
+                  case FCM -> d.setNtfyTopic(null);
                   case APN -> d.setApnId(null);
                 }
               }
@@ -230,7 +230,7 @@ public class PushNotificationManager {
 
   private static String getPushToken(final Device device, final PushNotification.TokenType tokenType) {
     return switch (tokenType) {
-      case FCM -> device.getGcmId();
+      case FCM -> device.getNtfyTopic();
       case APN -> device.getApnId();
     };
   }
