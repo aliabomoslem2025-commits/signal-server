@@ -51,7 +51,6 @@ import org.whispersystems.textsecuregcm.configuration.OneTimeDonationConfigurati
 import org.whispersystems.textsecuregcm.configuration.OpenTelemetryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.PagedSingleUseKEMPreKeyStoreConfiguration;
 import org.whispersystems.textsecuregcm.configuration.PaymentsServiceConfiguration;
-import org.whispersystems.textsecuregcm.configuration.RegistrationServiceClientFactory;
 import org.whispersystems.textsecuregcm.configuration.RemoteConfigConfiguration;
 import org.whispersystems.textsecuregcm.configuration.ReportMessageConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RetryConfiguration;
@@ -287,11 +286,6 @@ public class WhisperServerConfiguration extends Configuration {
   @Valid
   @JsonProperty
   private SpamFilterConfiguration spamFilter;
-
-  @Valid
-  @NotNull
-  @JsonProperty
-  private RegistrationServiceClientFactory registrationService;
 
   @Valid
   @NotNull
@@ -565,10 +559,6 @@ public class WhisperServerConfiguration extends Configuration {
 
   public SpamFilterConfiguration getSpamFilterConfiguration() {
     return spamFilter;
-  }
-
-  public RegistrationServiceClientFactory getRegistrationServiceConfiguration() {
-    return registrationService;
   }
 
   public TurnConfiguration getTurnConfiguration() {
