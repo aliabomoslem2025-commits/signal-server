@@ -236,8 +236,6 @@ public record CommandDependencies(
         .keepAliveTime(io.dropwizard.util.Duration.seconds(60L)).build();
     ExecutorService apnSenderExecutor = ExecutorServiceBuilder.of(environment, "apnSender")
         .maxThreads(1).minThreads(1).build();
-    ExecutorService ntfySenderExecutor = ExecutorServiceBuilder.of(environment, "ntfySender")
-        .maxThreads(16).minThreads(16).build();
     ExecutorService clientEventExecutor = ManagedExecutors.newVirtualThreadPerTaskExecutor(
       "clientEvent", configuration.getVirtualThreadConfiguration().maxConcurrentThreadsPerExecutor(), environment);
     ExecutorService asyncOperationQueueingExecutor = ExecutorServiceBuilder.of(environment, "asyncOperationQueueing")
