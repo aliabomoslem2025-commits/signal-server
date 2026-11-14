@@ -247,6 +247,7 @@ public class AccountsManager extends RedisPubSubAdapter<String, String> implemen
 
   private enum PushTokenType {
     APNS("apns"),
+    NTFY("ntfy"),
     NONE("none");
 
     private final String tagValue;
