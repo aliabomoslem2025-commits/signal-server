@@ -343,7 +343,7 @@ public class AccountCreationDeletionIntegrationTest {
     return List.of(
         new DeliveryChannels(true, null),
         new DeliveryChannels(false, "apns-token"),
-        new DeliveryChannels(false, "apns-token", null),
+        new DeliveryChannels(false, "apns-token"),
         new DeliveryChannels(true, null));
   }
 
@@ -590,7 +590,7 @@ public class AccountCreationDeletionIntegrationTest {
         hasE164 ? Optional.of(number) : Optional.empty(),
         primaryDeviceSpec.password(),
         primaryDeviceSpec.signalAgent(),
-        new DeliveryChannels(true, null, null),
+        new DeliveryChannels(true, null),
         aciRegistrationId,
         hasE164 ? Optional.of(pniRegistrationId) : Optional.empty(),
         primaryDeviceSpec.deviceNameCiphertext(),
@@ -703,7 +703,7 @@ public class AccountCreationDeletionIntegrationTest {
     final byte[] recoveryPassword = TestRandomUtil.nextBytes(32);
     final ECKeyPair aciKeyPair = ECKeyPair.generate();
     final IdentityKey aciIdentityKey = new IdentityKey(aciKeyPair.getPublicKey());
-    final DeliveryChannels deliveryChannels = new DeliveryChannels(false, "apns-token", null);
+    final DeliveryChannels deliveryChannels = new DeliveryChannels(false, "apns-token");
 
     final UUID existingAccountUuid;
     {
