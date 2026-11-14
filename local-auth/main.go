@@ -19,25 +19,25 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"database/sql"
 	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"database/sql"
 )
 
 //go:embed schema.sql
 var schema string
 
 type config struct {
-	listenAddr       string
-	databaseURL      string
-	adminToken       []byte
-	internalToken    []byte
-	ticketSecret     []byte
+	listenAddr        string
+	databaseURL       string
+	adminToken        []byte
+	internalToken     []byte
+	ticketSecret      []byte
 	androidHashSecret []byte
-	allowedOrigins   map[string]bool
-	challengeTTL     time.Duration
+	allowedOrigins    map[string]bool
+	challengeTTL      time.Duration
 }
 
 type server struct {
@@ -55,9 +55,9 @@ type userRequest struct {
 }
 
 type deviceRequest struct {
-	AndroidID   string `json:"androidId"`
+	AndroidID    string `json:"androidId"`
 	PublicKeyPEM string `json:"publicKeyPem"`
-	Label       string `json:"label"`
+	Label        string `json:"label"`
 }
 
 type challengeRequest struct {
@@ -94,8 +94,8 @@ type ticketClaims struct {
 }
 
 type consumeTicketResponse struct {
-	Phone         string `json:"phone"`
-	AndroidIDHash string `json:"androidIdHash"`
+	Phone         string    `json:"phone"`
+	AndroidIDHash string    `json:"androidIdHash"`
 	ExpiresAt     time.Time `json:"expiresAt"`
 }
 
@@ -535,8 +535,8 @@ func (s *server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, challengeResponse{
 		ChallengeID: id,
-		Nonce: base64.RawURLEncoding.EncodeToString(nonce),
-		ExpiresAt: expires,
+		Nonce:       base64.RawURLEncoding.EncodeToString(nonce),
+		ExpiresAt:   expires,
 	})
 }
 
@@ -685,7 +685,7 @@ func (s *server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"registrationTicket": ticket,
-		"expiresAt": ticketExpiry,
+		"expiresAt":          ticketExpiry,
 		// Signal Server decodes registration session IDs with Base64.getUrlDecoder().
 		"sessionId": base64.RawURLEncoding.EncodeToString([]byte("LAN1." + ticket)),
 	})
@@ -696,7 +696,9 @@ func (s *server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var request struct { Ticket string `json:"ticket"` }
+	var request struct {
+		Ticket string `json:"ticket"`
+	}
 	if !decodeJSON(w, r, &request) {
 		return
 	}
@@ -732,7 +734,9 @@ func (s *server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var request struct { Ticket string `json:"ticket"` }
+	var request struct {
+		Ticket string `json:"ticket"`
+	}
 	if !decodeJSON(w, r, &request) {
 		return
 	}
