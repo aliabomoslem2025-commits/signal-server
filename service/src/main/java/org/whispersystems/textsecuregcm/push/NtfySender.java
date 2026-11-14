@@ -58,7 +58,9 @@ public final class NtfySender implements PushNotificationSender {
         .timeout(Duration.ofSeconds(8))
         .header("Authorization", "Bearer " + publisherToken)
         .header("Content-Type", "text/plain; charset=utf-8")
+        // Do not let ntfy forward this notification to any Firebase/FCM bridge.
         .header("X-Firebase", "no")
+        .header("X-UnifiedPush", "1")
         .header("Cache", "no")
         .header("X-Title", "Signal")
         .header("Priority", "3")
