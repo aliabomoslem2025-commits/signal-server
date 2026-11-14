@@ -54,6 +54,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.auth.BasicAuthorizationHeader;
 import org.whispersystems.textsecuregcm.auth.InvalidRegistrationSessionException;
+import org.whispersystems.textsecuregcm.auth.LocalAuthTicketClient;
 import org.whispersystems.textsecuregcm.auth.MfaFailureException;
 import org.whispersystems.textsecuregcm.auth.PhoneVerificationTokenManager;
 import org.whispersystems.textsecuregcm.auth.RecoveryPasswordVerificationFailedException;
@@ -361,6 +362,13 @@ public class RegistrationController {
       final String userAgent,
       final String signalAgent) {
 
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      throw new WebApplicationException(Response.status(Response.Status.GONE)
+          .entity("Phone-less registration is disabled in LAN-only mode.")
+          .type(MediaType.TEXT_PLAIN)
+          .build());
+    }
+
     if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
       throw new BadRequestException("login purchases are not enabled");
     }
@@ -426,6 +434,13 @@ public class RegistrationController {
       final RegistrationRequest registrationRequest,
       final String userAgent,
       final String signalAgent) throws RegistrationLockFailureException, RateLimitExceededException, MfaFailureException {
+
+    if (LocalAuthTicketClient.isLocalAuthOnlyEnabled()) {
+      throw new WebApplicationException(Response.status(Response.Status.GONE)
+          .entity("Recovery-password account recovery is disabled in LAN-only mode. Re-authenticate with an enrolled device.")
+          .type(MediaType.TEXT_PLAIN)
+          .build());
+    }
 
     if (!dynamicConfigurationManager.getConfiguration().getLoginPurchaseConfiguration().enabled()) {
       throw new BadRequestException("login purchases are not enabled");
