@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
-import org.checkerframework.checker.nullness.qual.Nullable;
+import javax.annotation.Nullable;
 import org.whispersystems.textsecuregcm.configuration.secrets.SecretBytes;
 import org.whispersystems.textsecuregcm.entities.RegistrationServiceSession;
 import org.whispersystems.textsecuregcm.registration.ClientType;
