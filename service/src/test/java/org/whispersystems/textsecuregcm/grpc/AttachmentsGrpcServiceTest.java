@@ -20,10 +20,6 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
-import java.security.spec.InvalidKeySpecException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
@@ -45,12 +41,10 @@ import org.signal.chat.attachments.GetUploadFormResponse;
 import org.signal.chat.common.S3UploadForm;
 import org.signal.chat.common.UploadForm;
 import org.whispersystems.textsecuregcm.attachments.AttachmentUtil;
-import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusConfiguration;
 import org.whispersystems.textsecuregcm.configuration.secrets.SecretBytes;
 import org.whispersystems.textsecuregcm.controllers.RateLimitExceededException;
-import org.whispersystems.textsecuregcm.experiment.ExperimentEnrollmentManager;
 import org.whispersystems.textsecuregcm.limits.RateLimiter;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
 import org.whispersystems.textsecuregcm.s3.PostPolicyGenerator;
@@ -65,8 +59,6 @@ class AttachmentsGrpcServiceTest extends
   private static final int MAX_UPLOAD_LENGTH = 1000;
 
   @Mock
-  private ExperimentEnrollmentManager experimentEnrollmentManager;
-  @Mock
   private RateLimiter countRateLimiter;
   @Mock
   private RateLimiter byteRateLimiter;
@@ -75,34 +67,19 @@ class AttachmentsGrpcServiceTest extends
 
   @Override
   protected AttachmentsGrpcService createServiceBeforeEachTest() {
-    try {
-      final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-      keyPairGenerator.initialize(1024);
-      final KeyPair keyPair = keyPairGenerator.generateKeyPair();
+    final TusAttachmentGenerator tusAttachmentGenerator =
+        new TusAttachmentGenerator(new TusConfiguration(new SecretBytes(TUS_SECRET), TUS_URL, TusConfiguration.DEFAULT_TOKEN_EXPIRATION));
 
-      final String gcsPrivateKeyPem = "-----BEGIN PRIVATE KEY-----\n" +
-          Base64.getMimeEncoder().encodeToString(keyPair.getPrivate().getEncoded()) + "\n" +
-          "-----END PRIVATE KEY-----";
-      final GcsAttachmentGenerator gcsAttachmentGenerator = new GcsAttachmentGenerator(
-          "some-cdn.signal.org", "signal@example.com", "/attach-here", gcsPrivateKeyPem);
-      final TusAttachmentGenerator tusAttachmentGenerator =
-          new TusAttachmentGenerator(new TusConfiguration(new SecretBytes(TUS_SECRET), TUS_URL, TusConfiguration.DEFAULT_TOKEN_EXPIRATION));
-
-      return new AttachmentsGrpcService(
-          experimentEnrollmentManager,
-          MockUtils.buildMock(RateLimiters.class, rateLimiters -> {
-            when(rateLimiters.getAttachmentLimiter()).thenReturn(countRateLimiter);
-            when(rateLimiters.getAttachmentBytesLimiter()).thenReturn(byteRateLimiter);
-            when(rateLimiters.getStickerPackLimiter()).thenReturn(stickerRateLimiter);
-          }),
-          gcsAttachmentGenerator,
-          tusAttachmentGenerator,
-          new PostPolicyGenerator("wakonda-south-7", "test", "accessId", "accessSecret"),
-          MAX_UPLOAD_LENGTH,
-          Clock.systemUTC());
-    } catch (NoSuchAlgorithmException | IOException | InvalidKeyException | InvalidKeySpecException e) {
-      throw new AssertionError(e);
-    }
+    return new AttachmentsGrpcService(
+        MockUtils.buildMock(RateLimiters.class, rateLimiters -> {
+          when(rateLimiters.getAttachmentLimiter()).thenReturn(countRateLimiter);
+          when(rateLimiters.getAttachmentBytesLimiter()).thenReturn(byteRateLimiter);
+          when(rateLimiters.getStickerPackLimiter()).thenReturn(stickerPackLimiter);
+        }),
+        tusAttachmentGenerator,
+        new PostPolicyGenerator("wakonda-south-7", "test", "accessId", "accessSecret"),
+        MAX_UPLOAD_LENGTH,
+        Clock.systemUTC());
   }
 
   @ParameterizedTest
