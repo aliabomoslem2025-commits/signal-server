@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +114,42 @@ func TestAndroidIDHashIsKeyedAndDeterministic(t *testing.T) {
 	}
 	if string(first) == string(other) {
 		t.Fatal("different Android IDs produced the same HMAC")
+	}
+}
+
+
+func TestAdminUserStatusRequiresPatch(t *testing.T) {
+	s := &server{}
+	request := httptest.NewRequest(http.MethodGet, "/v1/local-auth/admin/user-status/+4915112345678", nil)
+	response := httptest.NewRecorder()
+
+	s.handleAdminUserStatus(response, request)
+
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestAdminUserStatusRejectsInvalidPhone(t *testing.T) {
+	s := &server{}
+	request := httptest.NewRequest(http.MethodPatch, "/v1/local-auth/admin/user-status/not-a-phone", strings.NewReader(`{"active":false}`))
+	response := httptest.NewRecorder()
+
+	s.handleAdminUserStatus(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAdminEventsRejectsUnboundedLimit(t *testing.T) {
+	s := &server{}
+	request := httptest.NewRequest(http.MethodGet, "/v1/local-auth/admin/events?limit=101", nil)
+	response := httptest.NewRecorder()
+
+	s.handleAdminEvents(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
