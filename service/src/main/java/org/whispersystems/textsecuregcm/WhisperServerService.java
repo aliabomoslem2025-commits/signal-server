@@ -88,7 +88,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.asn.AsnInfoProvider;
 import org.whispersystems.textsecuregcm.asn.AsnInfoProviderImpl;
-import org.whispersystems.textsecuregcm.attachments.GcsAttachmentGenerator;
 import org.whispersystems.textsecuregcm.attachments.TusAttachmentGenerator;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
 import org.whispersystems.textsecuregcm.auth.AuthenticatedDevice;
@@ -943,12 +942,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(virtualThreadPinEventMonitor);
     environment.lifecycle().manage(accountsManager);
 
-    final GcsAttachmentGenerator gcsAttachmentGenerator = new GcsAttachmentGenerator(
-        config.getGcpAttachmentsConfiguration().domain(),
-        config.getGcpAttachmentsConfiguration().email(),
-        config.getGcpAttachmentsConfiguration().pathPrefix(),
-        config.getGcpAttachmentsConfiguration().rsaSigningKey().value());
-
     final PostPolicyGenerator profileCdnPolicyGenerator = new PostPolicyGenerator(config.getCdnConfiguration().region(),
         config.getCdnConfiguration().bucket(),
         config.getCdnConfiguration().credentials().accessKeyId().value(),
@@ -1146,8 +1139,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
             new MessagesGrpcService(accountsManager, reportMessageManager, phoneNumberIdentifiers, rateLimiters, messageSender, messageByteLimitCardinalityEstimator, spamChecker, messageDispatcher, Clock.systemUTC()),
             new BackupsGrpcService(accountsManager, backupAuthManager, backupMetrics),
             new DevicesGrpcService(accountsManager),
-            new AttachmentsGrpcService(experimentEnrollmentManager, rateLimiters, gcsAttachmentGenerator,
-                tusAttachmentGenerator, stickerPolicyGenerator,
+            new AttachmentsGrpcService(rateLimiters, tusAttachmentGenerator, stickerPolicyGenerator,
                 config.getAttachments().maxAttachmentUploadSizeInBytes(), Clock.systemUTC()),
             new PaymentsGrpcService(currencyManager),
             new ChallengeGrpcService(accountsManager, rateLimitChallengeManager, challengeConstraintChecker),
@@ -1311,8 +1303,8 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
         new AccountController(accountsManager, rateLimiters, phoneNumberRecoveryPasswordsManager,
             usernameHashZkProofVerifier),
         new AccountControllerV2(accountsManager, changeNumberManager),
-        new AttachmentControllerV4(rateLimiters, gcsAttachmentGenerator, tusAttachmentGenerator,
-            experimentEnrollmentManager, config.getAttachments().maxAttachmentUploadSizeInBytes()),
+        new AttachmentControllerV4(rateLimiters, tusAttachmentGenerator,
+            config.getAttachments().maxAttachmentUploadSizeInBytes()),
         new ArchiveController(accountsManager, backupAuthManager, backupManager, backupMetrics, config.getAttachments().maxAttachmentUploadSizeInBytes(), config.getAttachments().maxMessageBackupUploadSizeInBytes()),
         new CallRoutingControllerV2(rateLimiters, turnCredentialsProvider),
         new CallLinkController(rateLimiters, callingGenericZkSecretParams, callingPreV101GenericZkSecretParams),
