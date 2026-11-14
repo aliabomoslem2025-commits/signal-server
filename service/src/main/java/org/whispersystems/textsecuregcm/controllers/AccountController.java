@@ -108,7 +108,7 @@ public class AccountController {
   public NtfyRegistrationResponse registerNtfyTopic(@Auth AuthenticatedDevice auth) {
     accounts.updateDevice(auth.accountIdentifier(), auth.deviceId(), device -> {
       if (StringUtils.isBlank(device.getNtfyTopic())) {
-        final byte[] entropy = new byte[24];
+        final byte[] entropy = new byte[32];
         NTFY_TOPIC_RANDOM.nextBytes(entropy);
         device.setNtfyTopic("signal-" + Base64.getUrlEncoder().withoutPadding().encodeToString(entropy));
         device.setApnId(null);
