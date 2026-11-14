@@ -36,6 +36,17 @@ jobs:
         run: go vet ./...
       - name: Test and compile
         run: go test ./...
+      - name: Build local-auth container image
+        run: docker build --pull -t signal-local-auth-ci:latest .
+      - name: Validate local-auth Compose deployment
+        env:
+          LOCAL_AUTH_DB_PASSWORD: ci-db-password
+          LOCAL_AUTH_ADMIN_TOKEN: ci-admin-token
+          LOCAL_AUTH_INTERNAL_TOKEN: ci-internal-token
+          LOCAL_AUTH_TICKET_HMAC_SECRET: ci-ticket-hmac-secret
+          LOCAL_AUTH_ANDROID_ID_HASH_SECRET: ci-android-id-hash-secret
+          LOCAL_AUTH_ALLOWED_ORIGINS: https://dashboard.lan
+        run: docker compose config --quiet
 
   signal-server-java:
     name: Compile Signal server
