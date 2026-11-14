@@ -301,7 +301,7 @@
     </dependency>
 
     <dependency>
-      <!-- jackson-dataformat-xml (via firebase-admin), wants >= 4.3.0 -->
+      <!-- jackson-dataformat-xml dependency alignment -->
       <groupId>org.codehaus.woodstox</groupId>
       <artifactId>stax2-api</artifactId>
       <version>4.3.2</version>
