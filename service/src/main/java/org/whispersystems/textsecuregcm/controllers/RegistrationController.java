@@ -327,8 +327,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().pniSignedPreKey().get(),
                 registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().get())),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            ),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
 
     if (!localAuthSession && verificationType == PhoneVerificationRequest.VerificationType.SESSION) {
@@ -414,8 +413,7 @@ public class RegistrationController {
                   .aciSignedPreKey(), registrationRequest.deviceActivationRequest().aciPqLastResortPreKey()),
               Optional.empty(),
               registrationRequest.accountAttributes().getFetchesMessages(),
-              registrationRequest.deviceActivationRequest().apnToken(),
-              ),
+              registrationRequest.deviceActivationRequest().apnToken()),
           userAgent);
 
       Metrics.counter(ACCOUNT_CREATED_COUNTER_NAME, Tags.of(UserAgentTagUtil.getPlatformTag(userAgent),
@@ -549,8 +547,7 @@ public class RegistrationController {
                 registrationRequest.deviceActivationRequest().pniSignedPreKey().orElseThrow(),
                 registrationRequest.deviceActivationRequest().pniPqLastResortPreKey().orElseThrow())),
             registrationRequest.accountAttributes().getFetchesMessages(),
-            registrationRequest.deviceActivationRequest().apnToken(),
-            registrationRequest.deviceActivationRequest().gcmToken()),
+            registrationRequest.deviceActivationRequest().apnToken()),
         userAgent);
   }
 
