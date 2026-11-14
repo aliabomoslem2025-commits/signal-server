@@ -53,7 +53,6 @@ class AttachmentsGrpcServiceTest extends
   @Mock
   private RateLimiter byteRateLimiter;
   @Mock
-  @Mock
   private RateLimiter stickerRateLimiter;
 
   @Override
