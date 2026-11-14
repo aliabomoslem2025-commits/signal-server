@@ -85,7 +85,13 @@ jobs:
           go-version: "1.23.x"
           cache-dependency-path: local-auth/go.mod
       - name: Verify Go formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf 'Go files need gofmt:\\n%s\\n' "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
       - name: Download Go dependencies
         run: go mod download
       - name: Go vet
